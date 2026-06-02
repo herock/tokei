@@ -416,28 +416,200 @@ struct PanelView: View {
         }
     }
 
+    @AppStorage("syncDir") private var syncDir = ""
+    @AppStorage("deviceName") private var deviceName = ""
+    @AppStorage("autoSync") private var autoSync = false
+    @AppStorage("syncInterval") private var syncInterval = 5
+
     var settingsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.tTertiary)
-                Text("显示卡片")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.tSecondary)
-            }
-            VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 14) {
+            // 显示卡片
+            settingsSection("square.grid.2x2", "显示卡片") {
                 settingsRow("Claude Code", tint: Theme.claude, isOn: $showClaude)
                 settingsRow("Codex", tint: Theme.codex, isOn: $showCodex)
                 settingsRow("Gemini CLI", tint: Theme.gemini, isOn: $showGemini)
                 settingsRow("Grok CLI", tint: Theme.grok, isOn: $showGrok)
                 settingsRow("Qoder", tint: Theme.qoder, isOn: $showQoder)
             }
+
+            Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
+
+            // 多设备同步
+            settingsSection("arrow.triangle.2.circlepath", "多设备同步") {
+                HStack {
+                    Text("启用").font(.system(size: 11)).foregroundStyle(Theme.tPrimary)
+                    Spacer()
+                    Toggle("", isOn: $store.syncEnabled)
+                        .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                        .onChange(of: store.syncEnabled) { on in
+                            if on { setupSync() } else { store.stopAutoSync() }
+                        }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04)))
+
+                if store.syncEnabled {
+                    // 设备名
+                    HStack {
+                        Text("设备名").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                        Spacer()
+                        TextField("hostname", text: $deviceName)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textFieldStyle(.plain)
+                            .frame(width: 100)
+                            .multilineTextAlignment(.trailing)
+                            .onChange(of: deviceName) { _ in saveSync() }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+
+                    // 同步目录
+                    HStack {
+                        Text("目录").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                        Spacer()
+                        Text(syncDir.isEmpty ? "未设置" : (syncDir as NSString).lastPathComponent)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(syncDir.isEmpty ? Theme.tTertiary : Theme.tSecondary)
+                            .lineLimit(1)
+                        Button("选择") { pickSyncDir() }
+                            .font(.system(size: 10))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.claude)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+
+                    // 立即同步 + 自动同步
+                    HStack(spacing: 8) {
+                        Button {
+                            store.doSync()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if store.syncing {
+                                    ProgressView().controlSize(.mini)
+                                } else {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 9))
+                                }
+                                Text("同步").font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(Theme.tPrimary)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.08)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.syncing || syncDir.isEmpty)
+
+                        Spacer()
+                        Text("自动").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                        Toggle("", isOn: $autoSync)
+                            .toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                            .onChange(of: autoSync) { on in
+                                if on { store.startAutoSync(minutes: syncInterval) }
+                                else { store.stopAutoSync() }
+                            }
+                        if autoSync {
+                            Picker("", selection: $syncInterval) {
+                                Text("1m").tag(1); Text("5m").tag(5); Text("15m").tag(15)
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 90)
+                            .controlSize(.mini)
+                            .onChange(of: syncInterval) { v in
+                                store.startAutoSync(minutes: v)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+
+                    // 展示范围
+                    HStack {
+                        Text("展示").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                        Spacer()
+                        Picker("", selection: $store.showAllDevices) {
+                            Text("本机").tag(false); Text("全部设备").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 120)
+                        .controlSize(.mini)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+
+                    // 设备状态
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "desktopcomputer")
+                                .font(.system(size: 8)).foregroundStyle(.green)
+                            Text(deviceName.isEmpty ? "本机" : deviceName)
+                                .font(.system(size: 10, weight: .medium)).foregroundStyle(Theme.tPrimary)
+                            Text("(本机)").font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+                        }
+                        if store.peers.isEmpty {
+                            HStack(spacing: 5) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 8)).foregroundStyle(Theme.tTertiary)
+                                Text("等待其他设备…")
+                                    .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                            }
+                        } else {
+                            ForEach(store.peers) { p in
+                                HStack(spacing: 5) {
+                                    Image(systemName: "laptopcomputer")
+                                        .font(.system(size: 8)).foregroundStyle(Theme.codex)
+                                    Text(p.deviceId)
+                                        .font(.system(size: 10, weight: .medium)).foregroundStyle(Theme.tPrimary)
+                                    Spacer()
+                                    Text(Fmt.reset(Int(p.lastSync.timeIntervalSince1970)))
+                                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(Theme.tTertiary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                }
+            }
         }
         .padding(14)
-        .frame(width: 200)
+        .frame(width: 260)
         .background(Theme.bg)
         .environment(\.colorScheme, .dark)
+    }
+
+    func settingsSection<C: View>(_ icon: String, _ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.tTertiary)
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.tSecondary)
+            }
+            VStack(spacing: 2) { content() }
+        }
+    }
+
+    func setupSync() {
+        if deviceName.isEmpty { deviceName = ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "mac" }
+        saveSync()
+    }
+
+    func saveSync() {
+        let cfg = SyncConfig(device_id: deviceName, sync_dir: syncDir,
+                             auto_sync: autoSync, sync_interval: syncInterval)
+        store.syncManager.saveConfig(cfg)
+    }
+
+    func pickSyncDir() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "选择同步目录"
+        if panel.runModal() == .OK, let url = panel.url {
+            syncDir = url.path
+            saveSync()
+        }
     }
 
     func settingsRow(_ name: String, tint: Color, isOn: Binding<Bool>) -> some View {

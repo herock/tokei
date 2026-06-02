@@ -5,15 +5,50 @@ import Combine
 final class Store: ObservableObject {
     @Published var usage: Usage?
     @Published var lastUpdated: String = "加载中…"
+    @Published var peers: [PeerDevice] = []
+    @Published var syncing = false
+
+    let syncManager = SyncManager()
+    var autoSyncTimer: Timer?
+
+    @AppStorage("showAllDevices") var showAllDevices = true
+    @AppStorage("syncEnabled") var syncEnabled = false
 
     func refresh() {
         DataLoader.load { [weak self] u in
             guard let self = self else { return }
-            if let u = u { self.usage = u }
+            guard var local = u else { return }
+            if self.syncEnabled && self.showAllDevices {
+                let p = self.syncManager.loadPeers()
+                self.peers = p
+                if !p.isEmpty { local = SyncManager.merge(local: local, peers: p) }
+            } else {
+                self.peers = []
+            }
+            self.usage = local
             let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
             self.lastUpdated = "更新 " + f.string(from: Date())
             (NSApp.delegate as? AppDelegate)?.updateStatusTitle()
         }
+    }
+
+    func doSync() {
+        syncing = true
+        syncManager.gitSync { [weak self] ok in
+            self?.syncing = false
+            if ok { self?.refresh() }
+        }
+    }
+
+    func startAutoSync(minutes: Int) {
+        stopAutoSync()
+        autoSyncTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(minutes * 60),
+                                             repeats: true) { [weak self] _ in self?.doSync() }
+    }
+
+    func stopAutoSync() {
+        autoSyncTimer?.invalidate()
+        autoSyncTimer = nil
     }
 }
 

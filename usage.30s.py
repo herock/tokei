@@ -907,8 +907,33 @@ def compute():
     }
 
 
+_TOKEI_CONFIG = os.path.join(HOME, ".tokei", "config.json")
+
+
+def _load_tokei_config():
+    try:
+        with open(_TOKEI_CONFIG) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def main_json():
-    print(json.dumps(compute(), ensure_ascii=False))
+    d = compute()
+    print(json.dumps(d, ensure_ascii=False))
+    cfg = _load_tokei_config()
+    if cfg:
+        sync_dir = os.path.expanduser(cfg.get("sync_dir", ""))
+        device_id = cfg.get("device_id", "")
+        if sync_dir and device_id and os.path.isdir(sync_dir):
+            import time
+            d["_device"] = device_id
+            d["_ts"] = int(time.time())
+            try:
+                with open(os.path.join(sync_dir, f"{device_id}.json"), "w") as f:
+                    json.dump(d, f, ensure_ascii=False)
+            except OSError:
+                pass
 
 
 def main():
