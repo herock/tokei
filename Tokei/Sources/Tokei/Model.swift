@@ -283,6 +283,34 @@ struct OpenClawRanges: Codable {
 }
 struct OpenClawStat: Codable { var ranges: OpenClawRanges }
 
+struct OpenCodeRange: Codable {
+    var hit: Double
+    var `in`: Int
+    var out: Int
+    var cr: Int
+    var cw: Int
+    var reason: Int
+    var cost: Double
+    var sessions: Int = 0
+    var models: [HermesModelStat] = []
+}
+struct OpenCodeRanges: Codable {
+    var today, yesterday, week, month, year: OpenCodeRange
+    func get(_ k: RangeKey) -> OpenCodeRange {
+        switch k {
+        case .today: return today; case .yesterday: return yesterday
+        case .week: return week; case .month: return month; case .year: return year
+        }
+    }
+    mutating func set(_ k: RangeKey, _ v: OpenCodeRange) {
+        switch k {
+        case .today: today = v; case .yesterday: yesterday = v
+        case .week: week = v; case .month: month = v; case .year: year = v
+        }
+    }
+}
+struct OpenCodeStat: Codable { var ranges: OpenCodeRanges }
+
 struct Usage: Codable {
     var claude: ClaudeStat
     var codex: CodexStat
@@ -291,6 +319,7 @@ struct Usage: Codable {
     var qoder: QoderStat
     var hermes: HermesStat
     var openclaw: OpenClawStat
+    var opencode: OpenCodeStat
 }
 
 enum Fmt {

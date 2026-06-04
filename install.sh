@@ -47,21 +47,22 @@ else
     git clone "$REPO" "$SYNC_DIR"
 fi
 
-# 3. 下载采集脚本(如果不在本地)
+# 3. 下载采集脚本和价格文件
 SCRIPT="$TOKEI_DIR/usage.30s.py"
-if [ -f "$SCRIPT" ]; then
-    echo "[✓] 采集脚本已存在"
-else
-    # 尝试从同步仓库获取,或从当前目录复制
-    if [ -f "$(dirname "$0")/usage.30s.py" ]; then
-        cp "$(dirname "$0")/usage.30s.py" "$SCRIPT"
-    elif [ -f "$SYNC_DIR/usage.30s.py" ]; then
-        cp "$SYNC_DIR/usage.30s.py" "$SCRIPT"
+for fname in usage.30s.py pricing.json pricing_overrides.json; do
+    dst="$TOKEI_DIR/$fname"
+    if [ -f "$dst" ]; then
+        echo "[✓] $fname 已存在"
+    elif [ -f "$SYNC_DIR/$fname" ]; then
+        cp "$SYNC_DIR/$fname" "$dst"
+        echo "[✓] $fname 从同步仓库复制"
+    elif [ -f "$(dirname "$0")/$fname" ]; then
+        cp "$(dirname "$0")/$fname" "$dst"
+        echo "[✓] $fname 从本地复制"
     else
-        echo "[!] 请手动复制 usage.30s.py 到 $SCRIPT"
-        echo "    scp your-mac:path/to/usage.30s.py $SCRIPT"
+        echo "[!] 请手动复制 $fname 到 $dst"
     fi
-fi
+done
 
 # 4. 写配置
 cat > "$TOKEI_DIR/config.json" <<EOF
@@ -77,7 +78,8 @@ SYNC_SCRIPT="$TOKEI_DIR/sync.sh"
 cat > "$SYNC_SCRIPT" <<'SYNCEOF'
 #!/usr/bin/env bash
 cd "$HOME/.tokei/sync" || exit 1
-python3 "$HOME/.tokei/usage.30s.py" --json >/dev/null 2>&1
+TOKEI="$HOME/.tokei"
+PYTHONPATH="$TOKEI" python3 "$TOKEI/usage.30s.py" --json >/dev/null 2>&1
 git pull -q --rebase --autostash 2>/dev/null
 git add -A
 git diff --cached --quiet || git commit -qm "tokei sync $(cat $HOME/.tokei/config.json | python3 -c 'import sys,json;print(json.load(sys.stdin).get("device_id","unknown"))' 2>/dev/null || echo unknown)"

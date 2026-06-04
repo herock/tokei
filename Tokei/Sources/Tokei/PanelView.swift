@@ -15,9 +15,10 @@ struct PanelView: View {
     @AppStorage("showQoder") private var showQoder = true
     @AppStorage("showHermes") private var showHermes = true
     @AppStorage("showOpenClaw") private var showOpenClaw = true
+    @AppStorage("showOpenCode") private var showOpenCode = true
 
     private var visibleCount: Int {
-        [showClaude, showCodex, showGemini, showGrok, showQoder, showHermes, showOpenClaw].filter { $0 }.count
+        [showClaude, showCodex, showGemini, showGrok, showQoder, showHermes, showOpenClaw, showOpenCode].filter { $0 }.count
     }
     private var useWide: Bool { visibleCount > 2 }
     private var panelWidth: CGFloat { useWide ? 640 : Theme.panelWidth }
@@ -42,6 +43,7 @@ struct PanelView: View {
                             if showQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, u.qoder.ranges.get(sel)) } }
                             if showHermes { Card(tint: Theme.hermes) { hermesBlock(u.hermes.ranges.get(sel)) } }
                             if showOpenClaw { Card(tint: Theme.openclaw) { openclawBlock(u.openclaw.ranges.get(sel)) } }
+                            if showOpenCode { Card(tint: Theme.opencode) { opencodeBlock(u.opencode.ranges.get(sel)) } }
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -53,6 +55,7 @@ struct PanelView: View {
                     if showQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, u.qoder.ranges.get(sel)) } }
                     if showHermes { Card(tint: Theme.hermes) { hermesBlock(u.hermes.ranges.get(sel)) } }
                     if showOpenClaw { Card(tint: Theme.openclaw) { openclawBlock(u.openclaw.ranges.get(sel)) } }
+                    if showOpenCode { Card(tint: Theme.opencode) { opencodeBlock(u.opencode.ranges.get(sel)) } }
                 }
             } else {
                 HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
@@ -284,53 +287,100 @@ struct PanelView: View {
     func hermesBlock(_ r: HermesRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
             cardHead("Hermes", tint: Theme.hermes, hit: r.hit)
-            CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.hermes)
-            sessionCountRow(r.sessions, tint: Theme.hermes)
-            metricGrid({
-                var items: [Metric] = [
-                    .init("arrow.down", "输入", Fmt.human(r.in)),
-                    .init("arrow.up", "输出", Fmt.human(r.out)),
-                    .init("bolt.fill", "缓存读", Fmt.human(r.cr)),
-                ]
-                if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
-                return items
-            }(), tint: Theme.hermes)
-            disclaimer
+            if r.sessions > 0 {
+                CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.hermes)
+                sessionCountRow(r.sessions, tint: Theme.hermes)
+                metricGrid({
+                    var items: [Metric] = [
+                        .init("arrow.down", "输入", Fmt.human(r.in)),
+                        .init("arrow.up", "输出", Fmt.human(r.out)),
+                        .init("bolt.fill", "缓存读", Fmt.human(r.cr)),
+                    ]
+                    if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
+                    return items
+                }(), tint: Theme.hermes)
+                disclaimer
+            } else {
+                remoteHint("Hermes")
+            }
         }
     }
 
-    // MARK: - OpenClaw 卡片(降级:仅任务计数)
+    // MARK: - OpenClaw 卡片(网关:任务计数 + 远程提示)
     @ViewBuilder
     func openclawBlock(_ r: OpenClawRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
             cardHeadPlain("OpenClaw", tint: Theme.openclaw)
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("任务").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-                    Text("\(r.tasks)")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.tPrimary)
-                }
-                if r.completed > 0 {
+            if r.tasks > 0 {
+                HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("完成").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-                        Text("\(r.completed)")
+                        Text("任务").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                        Text("\(r.tasks)")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Theme.tPrimary)
                     }
-                }
-                if r.failed > 0 {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("失败").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-                        Text("\(r.failed)")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(.red.opacity(0.8))
+                    if r.completed > 0 {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("完成").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                            Text("\(r.completed)")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(.green)
+                        }
                     }
+                    if r.failed > 0 {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("失败").font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                            Text("\(r.failed)")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundStyle(.red.opacity(0.8))
+                        }
+                    }
+                    Spacer()
                 }
-                Spacer()
+                Text("网关编排器,token 由底层 Agent 采集")
+                    .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+            } else {
+                remoteHint("OpenClaw")
             }
-            Text("仅任务记录,无 token 数据")
+        }
+    }
+
+    // MARK: - OpenCode 卡片(完整:token + cost + 命中率)
+    @ViewBuilder
+    func opencodeBlock(_ r: OpenCodeRange) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            cardHead("OpenCode", tint: Theme.opencode, hit: r.hit)
+            if r.sessions > 0 {
+                CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.opencode)
+                sessionCountRow(r.sessions, tint: Theme.opencode)
+                metricGrid({
+                    var items: [Metric] = [
+                        .init("arrow.down", "输入", Fmt.human(r.in)),
+                        .init("arrow.up", "输出", Fmt.human(r.out)),
+                        .init("bolt.fill", "缓存读", Fmt.human(r.cr)),
+                        .init("square.stack.3d.up.fill", "缓存写", Fmt.human(r.cw)),
+                    ]
+                    if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
+                    return items
+                }(), tint: Theme.opencode)
+                disclaimer
+            } else {
+                remoteHint("OpenCode")
+            }
+        }
+    }
+
+    func remoteHint(_ tool: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "icloud.and.arrow.down")
+                    .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                Text("本地暂无 \(tool) 数据")
+                    .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+            }
+            Text("如在远程服务器运行,请在设置中开启「多设备同步」并部署采集脚本")
                 .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -510,6 +560,7 @@ struct PanelView: View {
                 settingsRow("Qoder", tint: Theme.qoder, isOn: $showQoder)
                 settingsRow("Hermes", tint: Theme.hermes, isOn: $showHermes)
                 settingsRow("OpenClaw", tint: Theme.openclaw, isOn: $showOpenClaw)
+                settingsRow("OpenCode", tint: Theme.opencode, isOn: $showOpenCode)
             }
 
             Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
@@ -697,41 +748,44 @@ struct PanelView: View {
 
                     // 添加远程设备
                     if store.syncEnabled && !syncDir.isEmpty {
+                        let repoUrl = Self.gitRemoteUrl(syncDir)
+                        let hasRemote = !repoUrl.contains("未配置")
                         Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("添加远程设备")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Theme.tSecondary)
-                            Text("在远程服务器执行:")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Theme.tTertiary)
-                            HStack {
-                                Text("bash install.sh --repo <仓库> --name <名称>")
-                                    .font(.system(size: 8.5, design: .monospaced))
+                            HStack(spacing: 5) {
+                                Image(systemName: "plus.circle").font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Theme.hermes)
+                                Text("添加远程设备")
+                                    .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(Theme.tSecondary)
-                                    .lineLimit(2)
-                                Spacer()
-                                Button {
-                                    let cmd = "bash install.sh --repo <YOUR_REPO> --name <SERVER_NAME>"
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(cmd, forType: .string)
-                                } label: {
-                                    Image(systemName: "doc.on.doc")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(Theme.tTertiary)
-                                }
-                                .buttonStyle(.plain)
                             }
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.primary.opacity(0.04)))
-
-                            Text("或让远程 Agent 安装 tokei-collector skill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Theme.tTertiary)
+                            if hasRemote {
+                                Text("复制给远程 Agent 或粘贴到远程终端:")
+                                    .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+                                copyBlock("git clone \(repoUrl) ~/.tokei/sync && echo '{\"sync_dir\":\"~/.tokei/sync\",\"device_id\":\"'$(hostname -s)'\"}' > ~/.tokei/config.json && (crontab -l 2>/dev/null; echo '*/5 * * * * cd ~/.tokei/sync && python3 usage.30s.py --json >/dev/null && git add -A && git diff --cached --quiet || git commit -qm sync && git push -q') | crontab -")
+                            } else {
+                                Text("同步目录未关联 Git 仓库,对 Agent 说:")
+                                    .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+                                copyBlock("读取 \(Self.skillPath) 并帮我配置 Tokei 同步")
+                            }
                         }
                         .padding(.horizontal, 10).padding(.vertical, 5)
                     }
+                }
+            }
+
+            // 远程采集提示
+            if !store.syncEnabled {
+                Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
+                settingsSection("antenna.radiowaves.left.and.right", "远程采集") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("远程 Hermes / OpenClaw 等数据需要同步采集")
+                            .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+                        Text("对 Agent 说:")
+                            .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+                        copyBlock("读取 \(Self.skillPath) 并按照里面的步骤帮我配置 Tokei 多设备同步")
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
                 }
             }
         }
@@ -795,6 +849,48 @@ struct PanelView: View {
                 store.refresh()
             }
         }
+    }
+
+    static var skillPath: String {
+        let script = DataLoader.scriptPath
+        return (script as NSString).deletingLastPathComponent + "/skills/tokei-setup.md"
+    }
+
+    static func gitRemoteUrl(_ dir: String) -> String {
+        let expanded = (dir as NSString).expandingTildeInPath
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.arguments = ["-C", expanded, "remote", "get-url", "origin"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        try? proc.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        let url = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return url.isEmpty ? "<未配置 git remote>" : url
+    }
+
+    func copyBlock(_ text: String) -> some View {
+        HStack(alignment: .top) {
+            Text(text)
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(Theme.tSecondary)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(Color.primary.opacity(0.04)))
     }
 
     func pickSyncDir() {

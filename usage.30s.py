@@ -23,6 +23,7 @@ GEMINI_DIR = os.path.join(HOME, ".gemini", "tmp")
 GROK_DIR = os.path.join(HOME, ".grok", "sessions")
 QODER_DIR = os.path.join(HOME, ".qoder")
 HERMES_DB = os.path.join(HOME, ".hermes", "state.db")
+OPENCODE_DIR = os.path.join(HOME, ".local", "share", "opencode", "storage", "message")
 OPENCLAW_DB = os.path.join(HOME, ".openclaw", "tasks", "runs.sqlite")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -862,6 +863,92 @@ def scan_openclaw(bounds, cache):
     return {"ranges": B}
 
 
+# ---------- OpenCode ----------
+# JSON 文件: ~/.local/share/opencode/storage/message/<session>/msg_*.json
+# 每条 assistant 消息有 tokens{input,output,reasoning,cache{read,write}} + cost + modelID。
+def scan_opencode(bounds, cache):
+    fc = cache.setdefault("opencode", {})
+    B = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0, "cost": 0.0,
+             "sessions": set(), "models": {}} for k in RANGE_KEYS}
+    if not os.path.isdir(OPENCODE_DIR):
+        return {"ranges": B}
+
+    today_d = bounds["today"].date()
+    yest_d = bounds["yesterday"].date()
+    week_d = bounds["week"].date()
+    month_d = bounds["month"].date()
+    year_d = bounds["year"].date()
+
+    stale = set(fc.keys())
+
+    for sess_dir in glob.glob(os.path.join(OPENCODE_DIR, "ses_*")):
+        for f in glob.glob(os.path.join(sess_dir, "msg_*.json")):
+            stale.discard(f)
+            try:
+                st = os.stat(f)
+            except OSError:
+                continue
+            sig = f"{st.st_mtime}:{st.st_size}"
+            entry = fc.get(f)
+            if entry and entry.get("sig") == sig:
+                day_data = entry.get("day")
+            else:
+                try:
+                    d = json.load(open(f, encoding="utf-8"))
+                except Exception:
+                    continue
+                if d.get("role") != "assistant":
+                    fc[f] = {"sig": sig, "day": None}
+                    continue
+                t = (d.get("time") or {}).get("created", 0)
+                if not t:
+                    fc[f] = {"sig": sig, "day": None}
+                    continue
+                tok = d.get("tokens") or {}
+                ca = tok.get("cache") or {}
+                model = d.get("modelID", "")
+                day_data = {
+                    "date": datetime.fromtimestamp(t / 1000).strftime("%Y-%m-%d"),
+                    "in": tok.get("input", 0) or 0,
+                    "out": tok.get("output", 0) or 0,
+                    "reason": tok.get("reasoning", 0) or 0,
+                    "cr": ca.get("read", 0) or 0,
+                    "cw": ca.get("write", 0) or 0,
+                    "cost": d.get("cost", 0) or 0,
+                    "session": d.get("sessionID", ""),
+                    "model": model,
+                }
+                fc[f] = {"sig": sig, "day": day_data}
+
+            if not day_data:
+                continue
+            try:
+                dd = date.fromisoformat(day_data["date"])
+            except ValueError:
+                continue
+            ks = []
+            if dd == today_d: ks.append("today")
+            if dd == yest_d: ks.append("yesterday")
+            if dd >= week_d: ks.append("week")
+            if dd >= month_d: ks.append("month")
+            if dd >= year_d: ks.append("year")
+            for k in ks:
+                b = B[k]
+                b["in"] += day_data["in"]; b["out"] += day_data["out"]
+                b["cr"] += day_data["cr"]; b["cw"] += day_data["cw"]
+                b["reason"] += day_data["reason"]; b["cost"] += day_data["cost"]
+                b["sessions"].add(day_data["session"])
+                mn = day_data["model"]
+                if mn:
+                    mm = b["models"].setdefault(mn, {"in": 0, "out": 0, "cost": 0.0})
+                    mm["in"] += day_data["in"]; mm["out"] += day_data["out"]
+                    mm["cost"] += day_data["cost"]
+
+    for p in stale:
+        fc.pop(p, None)
+    return {"ranges": B}
+
+
 def fmt_reset(epoch):
     try:
         return datetime.fromtimestamp(int(epoch)).astimezone().strftime("%m-%d %H:%M")
@@ -964,6 +1051,7 @@ def compute():
     qd = scan_qoder(bounds, cache)
     hm = scan_hermes(bounds, cache)
     oc = scan_openclaw(bounds, cache)
+    ocode = scan_opencode(bounds, cache)
     _save_scan_cache(cache)
 
     def claude_range(b):
@@ -1026,6 +1114,16 @@ def compute():
     hranges = {k: hermes_range(hm["ranges"][k]) for k in RANGE_KEYS}
     oranges = {k: openclaw_range(oc["ranges"][k]) for k in RANGE_KEYS}
 
+    def opencode_range(b):
+        denom = b["cr"] + b["cw"] + b["in"]
+        hit = (b["cr"] / denom * 100) if denom else 0.0
+        models = [{"name": nice_model(n), "in": v["in"], "out": v["out"], "cost": v["cost"]}
+                  for n, v in sorted(b["models"].items(), key=lambda kv: -kv[1]["cost"])]
+        return {"hit": hit, "in": b["in"], "out": b["out"], "cr": b["cr"], "cw": b["cw"],
+                "reason": b["reason"], "cost": b["cost"], "sessions": len(b["sessions"]), "models": models}
+
+    ocranges = {k: opencode_range(ocode["ranges"][k]) for k in RANGE_KEYS}
+
     cur = cc["cur"]
     cur_total = cur["in"] + cur["out"] + cur["cr"] + cur["cw"]
 
@@ -1066,6 +1164,9 @@ def compute():
         },
         "openclaw": {
             "ranges": oranges,
+        },
+        "opencode": {
+            "ranges": ocranges,
         },
     }
 
