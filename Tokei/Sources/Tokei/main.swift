@@ -101,6 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.store.refresh()
         }
+
+        if CommandLine.arguments.contains("--autoshow") {
+            popover.behavior = .applicationDefined
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.togglePopover()
+            }
+        }
     }
 
     func updateStatusTitle() {
@@ -143,11 +150,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.refresh()
             popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
-            DispatchQueue.main.async {
-                self.popover.contentViewController?.view.needsLayout = true
-                self.popover.contentViewController?.view.layoutSubtreeIfNeeded()
-                self.popover.contentSize = self.popover.contentViewController?.view.fittingSize ?? .zero
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.resizePopover()
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.resizePopover()
+            }
+        }
+    }
+
+    func resizePopover() {
+        guard popover.isShown else { return }
+        popover.contentViewController?.view.needsLayout = true
+        popover.contentViewController?.view.layoutSubtreeIfNeeded()
+        let size = popover.contentViewController?.view.fittingSize ?? .zero
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+        let capped = NSSize(width: size.width, height: min(size.height, screen.height - 60))
+        if capped.width > 0 && capped.height > 0 {
+            popover.contentSize = capped
         }
     }
 }
@@ -164,7 +184,7 @@ enum Shot {
             let store = Store()
             store.usage = usage
             store.lastUpdated = "预览"
-            let content = PanelView(store: store)
+            let content = PanelView(store: store, scrollable: false)
                 .background(Color(red: 0.22, green: 0.23, blue: 0.26))
             let renderer = ImageRenderer(content: content)
             renderer.scale = 2

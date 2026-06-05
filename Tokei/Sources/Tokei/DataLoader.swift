@@ -1,10 +1,34 @@
 import Foundation
 
 final class DataLoader {
-    // 数据唯一来源:复用 usage.30s.py --json
-    static let scriptPath = "/Users/lank/code/claude-code-research/tools/usage-bar/usage.30s.py"
+    static var scriptPath: String = {
+        let userScript = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".tokei/usage.30s.py").path
+        if FileManager.default.fileExists(atPath: userScript) {
+            return userScript
+        }
+        if let bundled = Bundle.main.resourcePath {
+            let bundledScript = (bundled as NSString).appendingPathComponent("usage.30s.py")
+            if FileManager.default.fileExists(atPath: bundledScript) {
+                installToUserDir(from: bundled)
+                return userScript
+            }
+        }
+        return userScript
+    }()
 
-    // 同步加载(离屏截图等场景用)
+    private static func installToUserDir(from resourceDir: String) {
+        let dest = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tokei")
+        try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        for name in ["usage.30s.py", "pricing.json", "pricing_overrides.json"] {
+            let src = (resourceDir as NSString).appendingPathComponent(name)
+            let dst = dest.appendingPathComponent(name).path
+            if FileManager.default.fileExists(atPath: src) && !FileManager.default.fileExists(atPath: dst) {
+                try? FileManager.default.copyItem(atPath: src, toPath: dst)
+            }
+        }
+    }
+
     static func loadSync() -> Usage? { runScript() }
 
     static func load(_ completion: @escaping (Usage?) -> Void) {
@@ -14,10 +38,10 @@ final class DataLoader {
         }
     }
 
-    private static func runScript() -> Usage? {
+    static func runScript(args: [String] = ["--json"]) -> Usage? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["python3", scriptPath, "--json"]
+        proc.arguments = ["python3", scriptPath] + args
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()

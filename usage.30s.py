@@ -27,8 +27,24 @@ OPENCODE_DIR = os.path.join(HOME, ".local", "share", "opencode", "storage", "mes
 OPENCLAW_DB = os.path.join(HOME, ".openclaw", "tasks", "runs.sqlite")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PRICING_FILE = os.path.join(BASE_DIR, "pricing.json")
-OVERRIDES_FILE = os.path.join(BASE_DIR, "pricing_overrides.json")
+_USER_DIR = os.path.join(HOME, ".tokei")
+
+def _writable_path(name):
+    """优先用 ~/.tokei/ 下的可写副本,没有则用脚本同目录(开发模式)。"""
+    user = os.path.join(_USER_DIR, name)
+    if os.path.isfile(user):
+        return user
+    base = os.path.join(BASE_DIR, name)
+    if os.path.isfile(base):
+        if ".app/" in BASE_DIR:
+            os.makedirs(_USER_DIR, exist_ok=True)
+            import shutil; shutil.copy2(base, user)
+            return user
+        return base
+    return os.path.join(_USER_DIR, name)
+
+PRICING_FILE = _writable_path("pricing.json")
+OVERRIDES_FILE = _writable_path("pricing_overrides.json")
 
 # 每 1M token 美元单价。基准价来自 OpenRouter,外置在 pricing.json(由 --update-prices 同步);
 # pricing_overrides.json 做本地修正(write1h / 别名 / 缺漏),一键更新不覆盖它。

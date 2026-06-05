@@ -3,6 +3,7 @@ import AppKit
 
 struct PanelView: View {
     @ObservedObject var store: Store
+    var scrollable = true
     @State private var sel: RangeKey = .today
     @State private var claudeModelsOpen = false
     @State private var geminiModelsOpen = false
@@ -23,7 +24,27 @@ struct PanelView: View {
     private var useWide: Bool { visibleCount > 2 }
     private var panelWidth: CGFloat { useWide ? 640 : Theme.panelWidth }
 
+    private var maxPanelHeight: CGFloat {
+        (NSScreen.main?.visibleFrame.height ?? 900) - 40
+    }
+
     var body: some View {
+        let w = showDashboard ? max(panelWidth, 480) : panelWidth
+        if scrollable {
+            ScrollView(.vertical, showsIndicators: false) { panelContent }
+                .frame(width: w)
+                .frame(maxHeight: maxPanelHeight)
+                .background(Theme.bg)
+                .environment(\.colorScheme, .dark)
+        } else {
+            panelContent
+                .frame(width: w, alignment: .top)
+                .background(Theme.bg)
+                .environment(\.colorScheme, .dark)
+        }
+    }
+
+    private var panelContent: some View {
         VStack(alignment: .leading, spacing: 13) {
             header
             if showDashboard {
@@ -34,15 +55,15 @@ struct PanelView: View {
                     HStack(alignment: .top, spacing: 13) {
                         VStack(alignment: .leading, spacing: 13) {
                             if showClaude { Card(tint: Theme.claude) { claudeBlock(u.claude, u.claude.ranges.get(sel)) } }
-                            if showCodex  { Card(tint: Theme.codex)  { codexBlock(u.codex, u.codex.ranges.get(sel)) } }
+                            if showGemini { Card(tint: Theme.gemini) { geminiBlock(u.gemini.ranges.get(sel)) } }
+                            if showQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, u.qoder.ranges.get(sel)) } }
+                            if showOpenClaw { Card(tint: Theme.openclaw) { openclawBlock(u.openclaw.ranges.get(sel)) } }
                         }
                         .frame(maxWidth: .infinity)
                         VStack(alignment: .leading, spacing: 13) {
-                            if showGemini { Card(tint: Theme.gemini) { geminiBlock(u.gemini.ranges.get(sel)) } }
+                            if showCodex  { Card(tint: Theme.codex)  { codexBlock(u.codex, u.codex.ranges.get(sel)) } }
                             if showGrok   { Card(tint: Theme.grok)   { grokBlock(u.grok.ranges.get(sel), model: u.grok.model) } }
-                            if showQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, u.qoder.ranges.get(sel)) } }
                             if showHermes { Card(tint: Theme.hermes) { hermesBlock(u.hermes.ranges.get(sel)) } }
-                            if showOpenClaw { Card(tint: Theme.openclaw) { openclawBlock(u.openclaw.ranges.get(sel)) } }
                             if showOpenCode { Card(tint: Theme.opencode) { opencodeBlock(u.opencode.ranges.get(sel)) } }
                         }
                         .frame(maxWidth: .infinity)
@@ -64,10 +85,6 @@ struct PanelView: View {
             footer
         }
         .padding(Theme.outerPad)
-        .frame(width: showDashboard ? max(panelWidth, 480) : panelWidth)
-        .background(Theme.bg)
-        .rotation3DEffect(.degrees(showDashboard ? 0 : 0), axis: (x: 0, y: 1, z: 0))
-        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - 品牌头部
