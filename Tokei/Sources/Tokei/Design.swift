@@ -1,5 +1,16 @@
 import SwiftUI
 
+struct VisualEffect: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
+}
+
 // 设计系统:颜色 / 间距 / 圆角集中定义,组件语义化复用。
 enum Theme {
     static let claude = Color(red: 0.92, green: 0.52, blue: 0.40)   // 柔珊瑚
@@ -37,7 +48,7 @@ struct Card<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         content()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(13)
             .background(
                 RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
@@ -61,6 +72,46 @@ struct Card<Content: View>: View {
                         lineWidth: 0.75)
             )
             .shadow(color: Color.black.opacity(0.30), radius: 12, x: 0, y: 6)
+    }
+}
+
+struct EqualHeightGrid: Layout {
+    var columns = 2
+    var hSpacing: CGFloat = 13
+    var vSpacing: CGFloat = 13
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let colW = colWidth(in: proposal.width ?? 600)
+        var h: CGFloat = 0
+        for row in stride(from: 0, to: subviews.count, by: columns) {
+            if row > 0 { h += vSpacing }
+            h += rowHeight(row: row, colW: colW, subviews: subviews)
+        }
+        return CGSize(width: proposal.width ?? 600, height: h)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let colW = colWidth(in: bounds.width)
+        var y = bounds.minY
+        for row in stride(from: 0, to: subviews.count, by: columns) {
+            let rh = rowHeight(row: row, colW: colW, subviews: subviews)
+            for i in row..<min(row + columns, subviews.count) {
+                let x = bounds.minX + CGFloat(i - row) * (colW + hSpacing)
+                subviews[i].place(at: CGPoint(x: x, y: y), anchor: .topLeading,
+                                  proposal: .init(width: colW, height: rh))
+            }
+            y += rh + vSpacing
+        }
+    }
+
+    private func colWidth(in total: CGFloat) -> CGFloat {
+        (total - hSpacing * CGFloat(columns - 1)) / CGFloat(columns)
+    }
+    private func rowHeight(row: Int, colW: CGFloat, subviews: Subviews) -> CGFloat {
+        (row..<min(row + columns, subviews.count)).map {
+            subviews[$0].sizeThatFits(.init(width: colW, height: nil)).height
+        }.max() ?? 0
     }
 }
 
@@ -135,14 +186,42 @@ struct MetricCell: View {
     }
 }
 
+struct RingMetricCell: View {
+    var value: Double
+    var label: String
+    var tint: Color
+    var body: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle().stroke(Color.primary.opacity(0.10), lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: max(0.001, min(1, value / 100)))
+                    .stroke(tint.gradient, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 21, height: 21)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Theme.tTertiary)
+                Text("\(Int(value.rounded()))%")
+                    .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.tPrimary)
+            }
+            Spacer(minLength: 0)
+        }
+        .animation(.easeOut(duration: 0.5), value: value)
+    }
+}
+
 // 大号成本焦点行。
 struct CostHeadline: View {
-    var cost: Double
+    var value: String
     var caption: String
     var tint: Color
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(String(format: "$%.2f", cost))
+            Text(value)
                 .font(.system(size: 23, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .contentTransition(.numericText())

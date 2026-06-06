@@ -34,11 +34,13 @@ struct PanelView: View {
             ScrollView(.vertical, showsIndicators: false) { panelContent }
                 .frame(width: w)
                 .frame(maxHeight: maxPanelHeight)
+                .background(VisualEffect())
                 .background(Theme.bg)
                 .environment(\.colorScheme, .dark)
         } else {
             panelContent
                 .frame(width: w, alignment: .top)
+                .background(VisualEffect())
                 .background(Theme.bg)
                 .environment(\.colorScheme, .dark)
         }
@@ -50,34 +52,43 @@ struct PanelView: View {
             if showDashboard {
                 DashboardView()
             } else if let u = store.usage {
+                let cr = u.claude.ranges.get(sel), xr = u.codex.ranges.get(sel)
+                let gr = u.gemini.ranges.get(sel), kr = u.grok.ranges.get(sel)
+                let qr = u.qoder.ranges.get(sel), hr = u.hermes.ranges.get(sel)
+                let lr = u.openclaw.ranges.get(sel), or = u.opencode.ranges.get(sel)
+                let hasClaude = showClaude && cr.sessions > 0
+                let hasCodex  = showCodex  && xr.sessions > 0
+                let hasGemini = showGemini && gr.sessions > 0
+                let hasGrok   = showGrok   && kr.sessions > 0
+                let hasQoder  = showQoder  && qr.calls > 0
+                let hasHermes = showHermes && hr.sessions > 0
+                let hasClaw   = showOpenClaw && lr.tasks > 0
+                let hasOCode  = showOpenCode && or.sessions > 0
                 SegmentedTabs(sel: $sel)
                 if useWide {
-                    HStack(alignment: .top, spacing: 13) {
-                        VStack(alignment: .leading, spacing: 13) {
-                            if showClaude { Card(tint: Theme.claude) { claudeBlock(u.claude, u.claude.ranges.get(sel)) } }
-                            if showGemini { Card(tint: Theme.gemini) { geminiBlock(u.gemini.ranges.get(sel)) } }
-                            if showQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, u.qoder.ranges.get(sel)) } }
-                            if showOpenClaw { Card(tint: Theme.openclaw) { openclawBlock(u.openclaw.ranges.get(sel)) } }
-                        }
-                        .frame(maxWidth: .infinity)
-                        VStack(alignment: .leading, spacing: 13) {
-                            if showCodex  { Card(tint: Theme.codex)  { codexBlock(u.codex, u.codex.ranges.get(sel)) } }
-                            if showGrok   { Card(tint: Theme.grok)   { grokBlock(u.grok.ranges.get(sel), model: u.grok.model) } }
-                            if showHermes { Card(tint: Theme.hermes) { hermesBlock(u.hermes.ranges.get(sel)) } }
-                            if showOpenCode { Card(tint: Theme.opencode) { opencodeBlock(u.opencode.ranges.get(sel)) } }
-                        }
-                        .frame(maxWidth: .infinity)
+                    EqualHeightGrid() {
+                        if hasClaude { Card(tint: Theme.claude) { claudeBlock(u.claude, cr) } }
+                        if hasCodex  { Card(tint: Theme.codex)  { codexBlock(u.codex, xr) } }
+                        if hasGemini { Card(tint: Theme.gemini) { geminiBlock(gr) } }
+                        if hasGrok   { Card(tint: Theme.grok)   { grokBlock(kr, model: u.grok.model) } }
+                        if hasQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, qr) } }
+                        if hasHermes { Card(tint: Theme.hermes) { hermesBlock(hr) } }
+                        if hasClaw   { Card(tint: Theme.openclaw) { openclawBlock(lr) } }
+                        if hasOCode  { Card(tint: Theme.opencode) { opencodeBlock(or) } }
                     }
                 } else {
-                    if showClaude { Card(tint: Theme.claude) { claudeBlock(u.claude, u.claude.ranges.get(sel)) } }
-                    if showCodex  { Card(tint: Theme.codex)  { codexBlock(u.codex, u.codex.ranges.get(sel)) } }
-                    if showGemini { Card(tint: Theme.gemini) { geminiBlock(u.gemini.ranges.get(sel)) } }
-                    if showGrok   { Card(tint: Theme.grok)   { grokBlock(u.grok.ranges.get(sel), model: u.grok.model) } }
-                    if showQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, u.qoder.ranges.get(sel)) } }
-                    if showHermes { Card(tint: Theme.hermes) { hermesBlock(u.hermes.ranges.get(sel)) } }
-                    if showOpenClaw { Card(tint: Theme.openclaw) { openclawBlock(u.openclaw.ranges.get(sel)) } }
-                    if showOpenCode { Card(tint: Theme.opencode) { opencodeBlock(u.opencode.ranges.get(sel)) } }
+                    if hasClaude { Card(tint: Theme.claude) { claudeBlock(u.claude, cr) } }
+                    if hasCodex  { Card(tint: Theme.codex)  { codexBlock(u.codex, xr) } }
+                    if hasGemini { Card(tint: Theme.gemini) { geminiBlock(gr) } }
+                    if hasGrok   { Card(tint: Theme.grok)   { grokBlock(kr, model: u.grok.model) } }
+                    if hasQoder  { Card(tint: Theme.qoder)  { qoderBlock(u.qoder, qr) } }
+                    if hasHermes { Card(tint: Theme.hermes) { hermesBlock(hr) } }
+                    if hasClaw   { Card(tint: Theme.openclaw) { openclawBlock(lr) } }
+                    if hasOCode  { Card(tint: Theme.opencode) { opencodeBlock(or) } }
                 }
+                inactiveToolsLine(hasClaude: hasClaude, hasCodex: hasCodex, hasGemini: hasGemini,
+                                  hasGrok: hasGrok, hasQoder: hasQoder, hasHermes: hasHermes,
+                                  hasClaw: hasClaw, hasOCode: hasOCode)
             } else {
                 HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                     .frame(height: 90)
@@ -133,27 +144,31 @@ struct PanelView: View {
     @ViewBuilder
     func claudeBlock(_ c: ClaudeStat, _ r: ClaudeRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            cardHead("Claude Code", tint: Theme.claude, hit: r.hit)
-            CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.claude)
-            sessionCountRow(r.sessions, tint: Theme.claude)
-            metricGrid([
-                (.init("arrow.down", "输入", Fmt.human(r.in))),
-                (.init("arrow.up", "输出", Fmt.human(r.out))),
-                (.init("bolt.fill", "缓存读", Fmt.human(r.cr))),
-                (.init("square.stack.3d.up.fill", "缓存写", Fmt.human(r.cw))),
-            ], tint: Theme.claude)
-            if !r.models.isEmpty {
-                modelDisclosure(r.models.map { ModelRow(name: $0.name, pin: $0.pin, pout: $0.pout, cost: $0.cost) },
-                                open: $claudeModelsOpen, tint: Theme.claude)
+            cardHead("Claude Code", tint: Theme.claude, sessions: r.sessions)
+            if r.sessions > 0 {
+                CostHeadline(value: Fmt.human(r.in + r.out + r.cr + r.cw), caption: "\(sel.label) 总量", tint: Theme.claude)
+                metricGrid([
+                    .init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost)),
+                ], hit: r.hit, extra: [
+                    .init("arrow.down", "输入", Fmt.human(r.in)),
+                    .init("arrow.up", "输出", Fmt.human(r.out)),
+                    .init("bolt.fill", "缓存读", Fmt.human(r.cr)),
+                    .init("square.stack.3d.up.fill", "缓存写", Fmt.human(r.cw)),
+                ], tint: Theme.claude)
+                if !r.models.isEmpty {
+                    modelDisclosure(r.models.map { ModelRow(name: $0.name, pin: $0.pin, pout: $0.pout, cost: $0.cost) },
+                                    open: $claudeModelsOpen, tint: Theme.claude)
+                }
+                if c.q5 != nil || c.q7 != nil { thinDivider }
+                if let q5 = c.q5 {
+                    quotaRow(title: "5h 剩余", pct: 100 - q5, reset: c.q5_reset, tint: Theme.claude)
+                }
+                if let q7 = c.q7 {
+                    quotaRow(title: "周剩余", pct: 100 - q7, reset: c.q7_reset, tint: Theme.claude)
+                }
+            } else {
+                emptyHint
             }
-            if c.q5 != nil || c.q7 != nil { thinDivider }
-            if let q5 = c.q5 {
-                quotaRow(title: "5h 剩余", pct: 100 - q5, reset: c.q5_reset, tint: Theme.claude)
-            }
-            if let q7 = c.q7 {
-                quotaRow(title: "周剩余", pct: 100 - q7, reset: c.q7_reset, tint: Theme.claude)
-            }
-            disclaimer
         }
     }
 
@@ -161,95 +176,94 @@ struct PanelView: View {
     @ViewBuilder
     func codexBlock(_ x: CodexStat, _ r: CodexRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            cardHead("Codex", tint: Theme.codex, hit: r.hit)
-            CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.codex)
-            sessionCountRow(r.sessions, tint: Theme.codex)
-            metricGrid({
-                var items: [Metric] = [
-                    .init("arrow.down", "输入", Fmt.human(r.in)),
-                    .init("bolt.fill", "缓存读", Fmt.human(r.cached)),
-                    .init("arrow.up", "输出", Fmt.human(r.out)),
-                ]
-                if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
-                return items
-            }(), tint: Theme.codex)
-            if x.p5 != nil || x.pw != nil { thinDivider }
-            if let p5 = x.p5 {
-                quotaRow(title: "5h 剩余", pct: 100 - p5, reset: x.r5, tint: Theme.codex)
-            }
-            if let pw = x.pw {
-                quotaRow(title: "周剩余", pct: 100 - pw, reset: x.rw, tint: Theme.codex)
-            }
-            if let plan = x.plan {
-                HStack {
-                    Text("plan").font(.system(size: 11)).foregroundStyle(Theme.tTertiary)
-                    Spacer()
-                    Text(plan)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Theme.tSecondary)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(Theme.codex.opacity(0.16)))
+            cardHead("Codex", tint: Theme.codex, sessions: r.sessions)
+            if r.sessions > 0 {
+                CostHeadline(value: Fmt.human(r.in + r.cached + r.out + r.reason), caption: "\(sel.label) 总量", tint: Theme.codex)
+                metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
+                    hit: r.hit, extra: {
+                    var items: [Metric] = [
+                        .init("arrow.down", "输入", Fmt.human(r.in)),
+                        .init("bolt.fill", "缓存读", Fmt.human(r.cached)),
+                        .init("arrow.up", "输出", Fmt.human(r.out)),
+                    ]
+                    if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
+                    return items
+                }(), tint: Theme.codex)
+                if x.p5 != nil || x.pw != nil { thinDivider }
+                if let p5 = x.p5 {
+                    quotaRow(title: "5h 剩余", pct: 100 - p5, reset: x.r5, tint: Theme.codex)
                 }
+                if let pw = x.pw {
+                    quotaRow(title: "周剩余", pct: 100 - pw, reset: x.rw, tint: Theme.codex)
+                }
+                if let plan = x.plan {
+                    HStack {
+                        Text("plan").font(.system(size: 11)).foregroundStyle(Theme.tTertiary)
+                        Spacer()
+                        Text(plan)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.tSecondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.codex.opacity(0.16)))
+                    }
+                }
+            } else {
+                emptyHint
             }
-            disclaimer
         }
     }
 
-    // MARK: - Gemini 卡片(完整成本卡,无配额)
+    // MARK: - Gemini 卡片
     @ViewBuilder
     func geminiBlock(_ r: GeminiRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            cardHead("Gemini CLI", tint: Theme.gemini, hit: r.hit)
-            CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.gemini)
-            sessionCountRow(r.sessions, tint: Theme.gemini)
-            metricGrid({
-                var items: [Metric] = [
-                    .init("arrow.down", "输入", Fmt.human(r.in)),
-                    .init("arrow.up", "输出", Fmt.human(r.out)),
-                    .init("bolt.fill", "缓存", Fmt.human(r.cached)),
-                ]
-                if r.thoughts > 0 { items.append(.init("brain", "推理", Fmt.human(r.thoughts))) }
-                return items
-            }(), tint: Theme.gemini)
-            if !r.models.isEmpty {
-                modelDisclosure(r.models.map { ModelRow(name: $0.name, pin: $0.pin, pout: $0.pout, cost: $0.cost) },
-                                open: $geminiModelsOpen, tint: Theme.gemini)
+            cardHead("Gemini CLI", tint: Theme.gemini, sessions: r.sessions)
+            if r.sessions > 0 {
+                CostHeadline(value: Fmt.human(r.in + r.cached + r.out + r.thoughts), caption: "\(sel.label) 总量", tint: Theme.gemini)
+                metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
+                    hit: r.hit, extra: {
+                    var items: [Metric] = [
+                        .init("arrow.down", "输入", Fmt.human(r.in)),
+                        .init("arrow.up", "输出", Fmt.human(r.out)),
+                        .init("bolt.fill", "缓存", Fmt.human(r.cached)),
+                    ]
+                    if r.thoughts > 0 { items.append(.init("brain", "推理", Fmt.human(r.thoughts))) }
+                    return items
+                }(), tint: Theme.gemini)
+                if !r.models.isEmpty {
+                    modelDisclosure(r.models.map { ModelRow(name: $0.name, pin: $0.pin, pout: $0.pout, cost: $0.cost) },
+                                    open: $geminiModelsOpen, tint: Theme.gemini)
+                }
+            } else {
+                emptyHint
             }
-            disclaimer
         }
     }
 
-    // MARK: - Grok 卡片(降级:仅上下文 token,不估成本)
+    // MARK: - Grok 卡片
     @ViewBuilder
     func grokBlock(_ r: GrokRange, model: String?) -> some View {
         VStack(alignment: .leading, spacing: 11) {
             cardHeadPlain("Grok CLI", tint: Theme.grok)
-            sessionCountRow(r.sessions, tint: Theme.grok)
-            HStack(spacing: 6) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.grok)
-                Text("累计上下文")
-                    .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-                Spacer(minLength: 6)
-                Text(Fmt.human(r.tokens))
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.tPrimary)
-                    .contentTransition(.numericText())
-                Text("token").font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
-            }
-            if let model, !model.isEmpty {
-                HStack {
-                    Text("model").font(.system(size: 11)).foregroundStyle(Theme.tTertiary)
-                    Spacer()
-                    Text(model)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Theme.tSecondary)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(Theme.grok.opacity(0.16)))
+            if r.sessions > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.grok)
+                    Text("累计上下文")
+                        .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
+                    Spacer(minLength: 6)
+                    Text(Fmt.human(r.tokens))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.tPrimary)
+                        .contentTransition(.numericText())
+                    Text("token").font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
                 }
+                if let model, !model.isEmpty {
+                    modelBadge(model, tint: Theme.grok)
+                }
+            } else {
+                emptyHint
             }
-            Text("仅上下文 token,非消耗量;成本 —")
-                .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
         }
     }
 
@@ -258,56 +272,49 @@ struct PanelView: View {
     func qoderBlock(_ q: QoderStat, _ r: QoderRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
             cardHeadPlain("Qoder", tint: Theme.qoder)
-            sessionCountRow(r.sessions, tint: Theme.qoder)
-            metricGrid({
-                var items: [Metric] = [
-                    .init("terminal", "调用", "\(r.calls)"),
-                    .init("clock", "耗时", Fmt.duration(r.duration)),
-                ]
-                if r.ctx > 0 {
-                    items.append(.init("chart.bar.fill", "上下文", String(format: "%.0f%%", r.ctx)))
+            if r.calls > 0 {
+                metricGrid({
+                    var items: [Metric] = [
+                        .init("terminal", "调用", "\(r.calls)"),
+                        .init("clock", "耗时", Fmt.duration(r.duration)),
+                    ]
+                    if r.ctx > 0 {
+                        items.append(.init("chart.bar.fill", "上下文", String(format: "%.0f%%", r.ctx)))
+                    }
+                    if r.in > 0 {
+                        items.append(.init("arrow.down", "输入", Fmt.human(r.in)))
+                    }
+                    return items
+                }(), tint: Theme.qoder)
+                if let quota = q.quota {
+                    thinDivider
+                    if let uq = quota.userQuota, let rem = uq.remaining, let tot = uq.total {
+                        let pct = tot > 0 ? Double(rem) / Double(tot) * 100 : 0
+                        quotaRow(title: "个人额度", pct: pct, reset: quota.expiresAt.map { $0 / 1000 }, tint: Theme.qoder)
+                    }
+                    if let org = quota.orgResourcePackage, let rem = org.remaining, let cap = org.cap {
+                        let pct = cap > 0 ? Double(rem) / Double(cap) * 100 : 0
+                        quotaRow(title: "团队额度", pct: pct, reset: nil, tint: Theme.qoder)
+                    }
                 }
-                if r.in > 0 {
-                    items.append(.init("arrow.down", "输入", Fmt.human(r.in)))
+                if let model = q.model, !model.isEmpty {
+                    modelBadge(model, tint: Theme.qoder)
                 }
-                return items
-            }(), tint: Theme.qoder)
-            if let quota = q.quota {
-                thinDivider
-                if let uq = quota.userQuota, let rem = uq.remaining, let tot = uq.total {
-                    let pct = tot > 0 ? Double(rem) / Double(tot) * 100 : 0
-                    quotaRow(title: "个人额度", pct: pct, reset: quota.expiresAt.map { $0 / 1000 }, tint: Theme.qoder)
-                }
-                if let org = quota.orgResourcePackage, let rem = org.remaining, let cap = org.cap {
-                    let pct = cap > 0 ? Double(rem) / Double(cap) * 100 : 0
-                    quotaRow(title: "团队额度", pct: pct, reset: nil, tint: Theme.qoder)
-                }
+            } else {
+                emptyHint
             }
-            if let model = q.model, !model.isEmpty {
-                HStack {
-                    Text("model").font(.system(size: 11)).foregroundStyle(Theme.tTertiary)
-                    Spacer()
-                    Text(model)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Theme.tSecondary)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(Theme.qoder.opacity(0.16)))
-                }
-            }
-            Text("token 暂不可用;额度来自本地日志")
-                .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
         }
     }
 
-    // MARK: - Hermes 卡片(完整:token + cost + 命中率)
+    // MARK: - Hermes 卡片
     @ViewBuilder
     func hermesBlock(_ r: HermesRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            cardHead("Hermes", tint: Theme.hermes, hit: r.hit)
+            cardHead("Hermes", tint: Theme.hermes, sessions: r.sessions)
             if r.sessions > 0 {
-                CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.hermes)
-                sessionCountRow(r.sessions, tint: Theme.hermes)
-                metricGrid({
+                CostHeadline(value: Fmt.human(r.in + r.out + r.cr + r.cw + r.reason), caption: "\(sel.label) 总量", tint: Theme.hermes)
+                metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
+                    hit: r.hit, extra: {
                     var items: [Metric] = [
                         .init("arrow.down", "输入", Fmt.human(r.in)),
                         .init("arrow.up", "输出", Fmt.human(r.out)),
@@ -316,14 +323,13 @@ struct PanelView: View {
                     if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
                     return items
                 }(), tint: Theme.hermes)
-                disclaimer
             } else {
-                remoteHint("Hermes")
+                emptyHint
             }
         }
     }
 
-    // MARK: - OpenClaw 卡片(网关:任务计数 + 远程提示)
+    // MARK: - OpenClaw 卡片
     @ViewBuilder
     func openclawBlock(_ r: OpenClawRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -354,23 +360,21 @@ struct PanelView: View {
                     }
                     Spacer()
                 }
-                Text("网关编排器,token 由底层 Agent 采集")
-                    .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
             } else {
-                remoteHint("OpenClaw")
+                emptyHint
             }
         }
     }
 
-    // MARK: - OpenCode 卡片(完整:token + cost + 命中率)
+    // MARK: - OpenCode 卡片
     @ViewBuilder
     func opencodeBlock(_ r: OpenCodeRange) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            cardHead("OpenCode", tint: Theme.opencode, hit: r.hit)
+            cardHead("OpenCode", tint: Theme.opencode, sessions: r.sessions)
             if r.sessions > 0 {
-                CostHeadline(cost: r.cost, caption: "\(sel.label) ≈成本", tint: Theme.opencode)
-                sessionCountRow(r.sessions, tint: Theme.opencode)
-                metricGrid({
+                CostHeadline(value: Fmt.human(r.in + r.out + r.cr + r.cw + r.reason), caption: "\(sel.label) 总量", tint: Theme.opencode)
+                metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
+                    hit: r.hit, extra: {
                     var items: [Metric] = [
                         .init("arrow.down", "输入", Fmt.human(r.in)),
                         .init("arrow.up", "输出", Fmt.human(r.out)),
@@ -380,24 +384,46 @@ struct PanelView: View {
                     if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
                     return items
                 }(), tint: Theme.opencode)
-                disclaimer
             } else {
-                remoteHint("OpenCode")
+                emptyHint
             }
         }
     }
 
-    func remoteHint(_ tool: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: "icloud.and.arrow.down")
-                    .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-                Text("本地暂无 \(tool) 数据")
-                    .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-            }
-            Text("如在远程服务器运行,请在设置中开启「多设备同步」并部署采集脚本")
-                .font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder
+    func inactiveToolsLine(hasClaude: Bool, hasCodex: Bool, hasGemini: Bool,
+                           hasGrok: Bool, hasQoder: Bool, hasHermes: Bool,
+                           hasClaw: Bool, hasOCode: Bool) -> some View {
+        let names: [(Bool, String)] = [
+            (showClaude && !hasClaude, "Claude"), (showCodex && !hasCodex, "Codex"),
+            (showGemini && !hasGemini, "Gemini"), (showGrok && !hasGrok, "Grok"),
+            (showQoder && !hasQoder, "Qoder"), (showHermes && !hasHermes, "Hermes"),
+            (showOpenClaw && !hasClaw, "OpenClaw"), (showOpenCode && !hasOCode, "OpenCode"),
+        ]
+        let inactive = names.filter(\.0).map(\.1)
+        if !inactive.isEmpty {
+            Text(inactive.joined(separator: " · ") + " 暂无数据")
+                .font(.system(size: 9))
+                .foregroundStyle(Theme.tTertiary)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    var emptyHint: some View {
+        Text("暂无数据")
+            .font(.system(size: 10))
+            .foregroundStyle(Theme.tTertiary)
+    }
+
+    func modelBadge(_ model: String, tint: Color) -> some View {
+        HStack {
+            Text("model").font(.system(size: 11)).foregroundStyle(Theme.tTertiary)
+            Spacer()
+            Text(model)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.tSecondary)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(tint.opacity(0.16)))
         }
     }
 
@@ -414,18 +440,19 @@ struct PanelView: View {
         var id: String { name }
     }
 
-    func cardHead(_ title: String, tint: Color, hit: Double) -> some View {
-        HStack(alignment: .center) {
-            HStack(spacing: 7) {
-                Circle().fill(tint.gradient).frame(width: 8, height: 8)
-                    .shadow(color: tint.opacity(0.6), radius: 3)
-                Text(title).font(.system(size: 14, weight: .bold))
+    func cardHead(_ title: String, tint: Color, sessions: Int = 0) -> some View {
+        HStack(spacing: 7) {
+            Circle().fill(tint.gradient).frame(width: 8, height: 8)
+                .shadow(color: tint.opacity(0.6), radius: 3)
+            Text(title).font(.system(size: 14, weight: .bold))
+            if sessions > 0 {
+                Text("\(sessions)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 5).padding(.vertical, 1.5)
+                    .background(Capsule().fill(tint.opacity(0.12)))
             }
             Spacer()
-            HStack(spacing: 6) {
-                Text("命中").font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
-                RingGauge(value: hit, tint: tint, size: 38)
-            }
         }
     }
 
@@ -439,34 +466,30 @@ struct PanelView: View {
         }
     }
 
-    func metricGrid(_ items: [Metric], tint: Color) -> some View {
+    @ViewBuilder
+    func metricGrid(_ top: [Metric], hit: Double = 0, extra: [Metric] = [], tint: Color) -> some View {
+        let all = top + extra
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                             GridItem(.flexible(), spacing: 10)],
                   alignment: .leading, spacing: 9) {
-            ForEach(items.indices, id: \.self) { i in
-                MetricCell(icon: items[i].icon, label: items[i].label,
-                           value: items[i].value, tint: tint)
+            ForEach(top.indices, id: \.self) { i in
+                MetricCell(icon: top[i].icon, label: top[i].label,
+                           value: top[i].value, tint: tint)
+            }
+            if hit > 0 {
+                RingMetricCell(value: hit, label: "Cache Hit", tint: tint)
+            }
+            let offset = top.count + (hit > 0 ? 1 : 0)
+            ForEach(extra.indices, id: \.self) { i in
+                MetricCell(icon: extra[i].icon, label: extra[i].label,
+                           value: extra[i].value, tint: tint)
+                    .id(offset + i)
             }
         }
     }
 
     var thinDivider: some View {
         Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
-    }
-
-    func sessionCountRow(_ n: Int, tint: Color) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(.system(size: 9, weight: .semibold)).foregroundStyle(tint)
-            Text("\(sel.label)会话")
-                .font(.system(size: 10)).foregroundStyle(Theme.tTertiary)
-            Spacer(minLength: 6)
-            Text("\(n)")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(Theme.tPrimary)
-                .contentTransition(.numericText())
-            Text("个").font(.system(size: 9)).foregroundStyle(Theme.tTertiary)
-        }
     }
 
     func sessionRow(_ name: String, _ total: Int) -> some View {
@@ -482,7 +505,7 @@ struct PanelView: View {
     }
 
     var disclaimer: some View {
-        Text("按 API 价估,非订阅实付")
+        Text("成本按 API 价估算,非订阅实付")
             .font(.system(size: 9))
             .foregroundStyle(Theme.tTertiary)
     }
@@ -552,10 +575,13 @@ struct PanelView: View {
     }
 
     var footer: some View {
-        HStack(spacing: 4) {
-            Spacer()
-            IconButton(icon: "arrow.clockwise", label: "刷新") { store.refresh() }
-            IconButton(icon: "power", label: "退出") { NSApp.terminate(nil) }
+        VStack(spacing: 6) {
+            disclaimer
+            HStack(spacing: 4) {
+                Spacer()
+                IconButton(icon: "arrow.clockwise", label: "刷新") { store.refresh() }
+                IconButton(icon: "power", label: "退出") { NSApp.terminate(nil) }
+            }
         }
     }
 

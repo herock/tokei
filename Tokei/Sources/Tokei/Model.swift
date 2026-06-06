@@ -325,6 +325,7 @@ struct Usage: Codable {
 enum Fmt {
     static func human(_ n: Int) -> String {
         let v = Double(n)
+        if v >= 100_000_000 { return String(format: "%.1f亿", v / 100_000_000) }
         if v >= 1_000_000 { return String(format: "%.1fM", v / 1_000_000) }
         if v >= 1_000 { return String(format: "%.0fK", v / 1_000) }
         return String(format: "%.0f", v)

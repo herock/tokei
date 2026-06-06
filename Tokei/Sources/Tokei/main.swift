@@ -71,29 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusTitle()
 
         let host = NSHostingController(rootView: PanelView(store: store))
-        let vc = NSViewController()
-        let effect = NSVisualEffectView()
-        effect.material = .hudWindow
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.translatesAutoresizingMaskIntoConstraints = false
-        host.view.translatesAutoresizingMaskIntoConstraints = false
-        effect.addSubview(host.view)
-        let container = NSView()
-        container.addSubview(effect)
-        vc.view = container
-        NSLayoutConstraint.activate([
-            effect.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            effect.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            effect.topAnchor.constraint(equalTo: container.topAnchor),
-            effect.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            host.view.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            host.view.topAnchor.constraint(equalTo: effect.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
-        ])
-
-        popover.contentViewController = vc
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
         popover.behavior = .transient
         popover.animates = true
 
@@ -106,6 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.behavior = .applicationDefined
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 self?.togglePopover()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self?.popover.behavior = .transient
+                }
             }
         }
     }
@@ -150,24 +132,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.refresh()
             popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                self.resizePopover()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                self.resizePopover()
-            }
-        }
-    }
-
-    func resizePopover() {
-        guard popover.isShown else { return }
-        popover.contentViewController?.view.needsLayout = true
-        popover.contentViewController?.view.layoutSubtreeIfNeeded()
-        let size = popover.contentViewController?.view.fittingSize ?? .zero
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-        let capped = NSSize(width: size.width, height: min(size.height, screen.height - 60))
-        if capped.width > 0 && capped.height > 0 {
-            popover.contentSize = capped
         }
     }
 }
