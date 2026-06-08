@@ -7,10 +7,9 @@ struct PanelView: View {
     @State private var sel: RangeKey = .today
     @State private var claudeModelsOpen = false
     @State private var geminiModelsOpen = false
-    @State private var settingsOpen = false
     @State private var mode: PanelMode = .cards
     @State private var trailProjects: [TrailProject]?
-    enum PanelMode { case cards, dashboard, projects }
+    enum PanelMode { case cards, dashboard, projects, settings }
     @AppStorage("showClaude") private var showClaude = true
     @AppStorage("showCodex") private var showCodex = true
     @AppStorage("showGemini") private var showGemini = true
@@ -64,6 +63,8 @@ struct PanelView: View {
                 DashboardView()
             } else if mode == .projects {
                 ProjectTrailView(cached: $trailProjects)
+            } else if mode == .settings {
+                settingsContent
             } else if let u = store.usage {
                 let cr = u.claude.ranges.get(sel), xr = u.codex.ranges.get(sel)
                 let gr = u.gemini.ranges.get(sel), kr = u.grok.ranges.get(sel)
@@ -192,17 +193,18 @@ struct PanelView: View {
             }
             .buttonStyle(.plain)
             .tip("数据面板")
-            Button { settingsOpen.toggle() } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.35)) { mode = mode == .settings ? .cards : .settings }
+            } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.tTertiary)
+                    .foregroundStyle(mode == .settings ? Theme.claude : Theme.tTertiary)
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(Color.primary.opacity(0.06)))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .tip("设置")
-            .popover(isPresented: $settingsOpen, arrowEdge: .bottom) { settingsContent }
         }
     }
 
@@ -605,7 +607,7 @@ struct PanelView: View {
                 Text("按模型 (\(models.count))")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.tSecondary)
-                Image(systemName: "chevron.right")
+                Image(systemName: open.wrappedValue ? "chevron.down" : "chevron.right")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(Theme.tTertiary)
                 Spacer()
@@ -613,7 +615,7 @@ struct PanelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .popover(isPresented: open, arrowEdge: .trailing) {
+        if open.wrappedValue {
             VStack(alignment: .leading, spacing: 9) {
                 Text("按模型 · \(sel.label)")
                     .font(.system(size: 11, weight: .semibold))
@@ -635,10 +637,9 @@ struct PanelView: View {
                     }
                 }
             }
-            .padding(14)
-            .frame(width: 238)
-            .background(Theme.bg)
-            .environment(\.colorScheme, .dark)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(0.05)))
         }
     }
 
@@ -803,7 +804,6 @@ struct PanelView: View {
                                 .font(.system(size: 8.5, design: .monospaced))
                                 .foregroundStyle(Theme.tSecondary)
                                 .lineLimit(16)
-                                .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1065,7 +1065,7 @@ struct PanelView: View {
             .padding(.top, 2)
         }
         .padding(14)
-        .frame(width: 260)
+        .frame(width: mode == .settings ? min(panelWidth, 420) : 260)
         .background(Theme.bg)
         .environment(\.colorScheme, .dark)
     }
