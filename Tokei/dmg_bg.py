@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate DMG background image for Tokei installer."""
+"""Generate DMG background image for Tokei installer — light warm theme."""
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import math, os
 
@@ -7,23 +7,29 @@ W, H = 660, 400
 img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 draw = ImageDraw.Draw(img)
 
-# Elegant dark gradient background
+# Warm light gradient background (top: warm white → bottom: soft peach)
 for y in range(H):
     t = y / H
-    r = int(28 + t * 6)
-    g = int(28 + t * 5)
-    b = int(35 + t * 8)
+    r = int(245 - t * 12)
+    g = int(242 - t * 16)
+    b = int(238 - t * 20)
     draw.line([(0, y), (W, y)], fill=(r, g, b, 255))
 
-# Subtle radial vignette (darker edges, lighter center)
-vignette = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-vd = ImageDraw.Draw(vignette)
-cx, cy = W // 2, H // 2 - 20
-for r in range(max(W, H), 0, -1):
-    t = r / max(W, H)
-    alpha = int(t * t * 40)
-    vd.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0, 0, 0, alpha))
-img = Image.alpha_composite(img, vignette)
+# Soft radial glow behind icon positions
+def draw_glow(img, cx, cy, radius, color, alpha):
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    for r in range(radius, 0, -1):
+        t = r / radius
+        a = int(alpha * (1 - t * t))
+        ld.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*color, a))
+    layer = layer.filter(ImageFilter.GaussianBlur(radius // 3))
+    return Image.alpha_composite(img, layer)
+
+# Glow behind Tokei.app icon (left) and Applications (right)
+icon_y = 190
+img = draw_glow(img, 150, icon_y, 70, (255, 200, 170), 35)
+img = draw_glow(img, 510, icon_y, 70, (200, 210, 240), 30)
 
 # ── Fonts ──
 def get_font(size):
@@ -53,69 +59,67 @@ def get_mono(size):
                 pass
     return ImageFont.load_default()
 
-# ── Smooth curved arrow ──
-arrow_y = 195
-arrow_x1, arrow_x2 = 235, 425
+# ── Smooth arrow ──
+arrow_y = icon_y + 5
+arrow_x1, arrow_x2 = 220, 440
 
-# Soft glow under arrow
-glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-gd = ImageDraw.Draw(glow)
-for offset in range(3):
-    r = 20 - offset * 5
-    a = 10 + offset * 8
-    gd.line([(arrow_x1, arrow_y), (arrow_x2, arrow_y)],
-            fill=(255, 160, 90, a), width=r)
-glow = glow.filter(ImageFilter.GaussianBlur(15))
-img = Image.alpha_composite(img, glow)
+# Coral brand color for arrow
+coral = (235, 120, 90)
+coral_light = (245, 165, 130)
 
-# Clean arrow shaft — solid gradient line
+# Soft shadow under arrow
+shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+sd = ImageDraw.Draw(shadow)
+sd.line([(arrow_x1, arrow_y + 3), (arrow_x2, arrow_y + 3)],
+        fill=(180, 140, 120, 30), width=8)
+shadow = shadow.filter(ImageFilter.GaussianBlur(6))
+img = Image.alpha_composite(img, shadow)
+
+# Arrow shaft — smooth gradient
 arrow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 ad = ImageDraw.Draw(arrow)
 
-# Draw smooth gradient arrow shaft
-steps = 60
+steps = 80
 for i in range(steps):
     t = i / steps
-    x = int(arrow_x1 + t * (arrow_x2 - arrow_x1 - 15))
-    x_end = int(arrow_x1 + (i + 1) / steps * (arrow_x2 - arrow_x1 - 15))
-    alpha = int(100 + t * 140)
-    r = int(255 - t * 30)
-    g = int(160 + t * 40)
-    b = int(90 + t * 30)
-    ad.line([(x, arrow_y), (x_end, arrow_y)], fill=(r, g, b, alpha), width=3)
+    x = int(arrow_x1 + t * (arrow_x2 - arrow_x1 - 20))
+    x_end = int(arrow_x1 + (i + 1) / steps * (arrow_x2 - arrow_x1 - 20))
+    r = int(coral_light[0] + t * (coral[0] - coral_light[0]))
+    g = int(coral_light[1] + t * (coral[1] - coral_light[1]))
+    b = int(coral_light[2] + t * (coral[2] - coral_light[2]))
+    ad.line([(x, arrow_y), (x_end, arrow_y)], fill=(r, g, b, 220), width=3)
 
-# Arrow head — clean triangle
-head_x = arrow_x2 - 5
+# Arrow head
+head_x = arrow_x2 - 8
 ad.polygon([
-    (head_x + 16, arrow_y),
-    (head_x - 4, arrow_y - 12),
-    (head_x - 4, arrow_y + 12),
-], fill=(255, 180, 110, 230))
-
-# Small highlight on arrowhead
+    (head_x + 18, arrow_y),
+    (head_x - 2, arrow_y - 13),
+    (head_x - 2, arrow_y + 13),
+], fill=(*coral, 230))
+# Highlight on arrowhead
 ad.polygon([
-    (head_x + 12, arrow_y - 1),
-    (head_x, arrow_y - 7),
-    (head_x, arrow_y - 1),
-], fill=(255, 220, 180, 80))
+    (head_x + 14, arrow_y - 1),
+    (head_x + 2, arrow_y - 8),
+    (head_x + 2, arrow_y - 1),
+], fill=(255, 180, 160, 70))
 
 img = Image.alpha_composite(img, arrow)
 draw = ImageDraw.Draw(img)
 
-# ── Text labels ──
+# ── Text ──
 title_font = get_font(13)
-hint_font = get_font(11)
+hint_font = get_font(10)
 mono_font = get_mono(9)
 small_font = get_font(10)
 
-# "Drag to Applications" hint above arrow
+# "Drag to Applications" above arrow
 txt = "拖入 Applications 安装"
 bbox = draw.textbbox((0, 0), txt, font=title_font)
 tw = bbox[2] - bbox[0]
-draw.text(((W - tw) // 2, arrow_y - 35), txt,
-          fill=(220, 220, 230, 180), font=title_font)
+draw.text(((W - tw) // 2, arrow_y - 38), txt,
+          fill=(120, 100, 90, 200), font=title_font)
 
-# Bottom xattr hint — two parts: Chinese label + mono command
+# Bottom xattr hint
 label = "首次打开被拦截?  "
 cmd = "sudo xattr -rd com.apple.quarantine /Applications/Tokei.app"
 lbox = draw.textbbox((0, 0), label, font=hint_font)
@@ -124,20 +128,17 @@ lw = lbox[2] - lbox[0]
 cw = cbox[2] - cbox[0]
 total_w = lw + cw
 start_x = (W - total_w) // 2
-draw.text((start_x, H - 35), label,
-          fill=(140, 145, 165, 140), font=hint_font)
-draw.text((start_x + lw, H - 34), cmd,
-          fill=(120, 135, 160, 140), font=mono_font)
+draw.text((start_x, H - 30), label, fill=(160, 140, 130, 150), font=hint_font)
+draw.text((start_x + lw, H - 29), cmd, fill=(150, 130, 120, 140), font=mono_font)
 
-# Top brand tag
+# Top brand
 ver = "Tokei · AI Coding Usage Monitor"
 bbox = draw.textbbox((0, 0), ver, font=small_font)
 vw = bbox[2] - bbox[0]
-draw.text(((W - vw) // 2, 12), ver,
-          fill=(130, 130, 150, 100), font=small_font)
+draw.text(((W - vw) // 2, 10), ver, fill=(170, 155, 145, 130), font=small_font)
 
 # Convert to RGB
-out = Image.new("RGB", (W, H), (30, 30, 38))
+out = Image.new("RGB", (W, H), (245, 242, 238))
 out.paste(img, mask=img)
 out.save(os.path.join(os.path.dirname(__file__), "dmg_background.png"), quality=95)
 print("Generated dmg_background.png")
