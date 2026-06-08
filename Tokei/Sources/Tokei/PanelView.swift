@@ -687,6 +687,7 @@ struct PanelView: View {
     @State private var debugRunning = false
     @State private var debugOutput = ""
     @State private var debugExpanded = false
+    @State private var cachedRemoteUrl = ""
     @AppStorage("syncDir") private var syncDir = ""
     @AppStorage("deviceName") private var deviceName = ""
     @AppStorage("autoSync") private var autoSync = false
@@ -728,6 +729,12 @@ struct PanelView: View {
                 }
                 if let auto = cfg.auto_sync { autoSync = auto }
                 if let interval = cfg.sync_interval { syncInterval = interval }
+            }
+            if !syncDir.isEmpty {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let url = Self.gitRemoteUrl(syncDir)
+                    DispatchQueue.main.async { cachedRemoteUrl = url }
+                }
             }
         }
     }
@@ -938,8 +945,8 @@ struct PanelView: View {
                 deviceStatusBlock
 
                 if store.syncEnabled && !syncDir.isEmpty {
-                    let dataRepo = Self.gitRemoteUrl(syncDir)
-                    let hasRemote = !dataRepo.contains("未配置")
+                    let dataRepo = cachedRemoteUrl
+                    let hasRemote = !dataRepo.isEmpty && !dataRepo.contains("未配置")
                     Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 5) {
