@@ -1820,12 +1820,11 @@ def _streak_info(dates):
 
 
 def wrapped():
-    """Tokei 回顾:作息 / 项目 / 连续 / 成就。纯读扫描缓存(Claude),不联网。"""
+    """Tokei 回顾:作息 / 项目 / 连续 / 成就。汇总全部工具,不联网。"""
     cache = _load_scan_cache()
     if not cache.get("claude"):
-        compute()                       # 缓存空则先扫一遍(同 --json 路径)
+        compute()
         cache = _load_scan_cache()
-    fc = cache.get("claude", {})
 
     hours = [0] * 24
     weekday = [0] * 7
@@ -1836,6 +1835,8 @@ def wrapped():
     total_tokens = 0
     total_cost = 0.0
 
+    # --- Claude (有 hours / proj / models) ---
+    fc = cache.get("claude", {})
     for f, entry in fc.items():
         if not isinstance(entry, dict):
             continue
@@ -1858,6 +1859,79 @@ def wrapped():
                 nm = nice_model(mn)
                 model_tok[nm] = model_tok.get(nm, 0) + mv["in"] + mv["out"] + mv["cr"] + mv["cw"]
 
+    # --- Codex (in + cached + out + reason) ---
+    for f, entry in cache.get("codex", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for dk, day in entry.get("days", {}).items():
+            tok = day.get("in", 0) + day.get("cached", 0) + day.get("out", 0) + day.get("reason", 0)
+            day_tokens[dk] = day_tokens.get(dk, 0) + tok
+            total_tokens += tok
+            total_cost += day.get("cost", 0)
+            weekday[date.fromisoformat(dk).weekday()] += tok
+
+    # --- Hermes (in + out + cr + cw + reason) ---
+    for f, entry in cache.get("hermes", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for dk, day in entry.get("days", {}).items():
+            tok = day.get("in", 0) + day.get("out", 0) + day.get("cr", 0) + day.get("cw", 0) + day.get("reason", 0)
+            day_tokens[dk] = day_tokens.get(dk, 0) + tok
+            total_tokens += tok
+            total_cost += day.get("cost", 0)
+            weekday[date.fromisoformat(dk).weekday()] += tok
+
+    # --- OpenClaw (in + out + cr + cw) ---
+    for f, entry in cache.get("openclaw", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for dk, day in entry.get("days", {}).items():
+            tok = day.get("in", 0) + day.get("out", 0) + day.get("cr", 0) + day.get("cw", 0)
+            day_tokens[dk] = day_tokens.get(dk, 0) + tok
+            total_tokens += tok
+            total_cost += day.get("cost", 0)
+            weekday[date.fromisoformat(dk).weekday()] += tok
+
+    # --- OpenCode (in + out + cr + cw + reason) ---
+    for f, entry in cache.get("opencode", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for dk, day in entry.get("days", {}).items():
+            tok = day.get("in", 0) + day.get("out", 0) + day.get("cr", 0) + day.get("cw", 0) + day.get("reason", 0)
+            day_tokens[dk] = day_tokens.get(dk, 0) + tok
+            total_tokens += tok
+            total_cost += day.get("cost", 0)
+            weekday[date.fromisoformat(dk).weekday()] += tok
+
+    # --- Qoder (in + out, no cost) ---
+    for f, entry in cache.get("qoder", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for dk, day in entry.get("days", {}).items():
+            tok = day.get("in", 0) + day.get("out", 0)
+            day_tokens[dk] = day_tokens.get(dk, 0) + tok
+            total_tokens += tok
+            weekday[date.fromisoformat(dk).weekday()] += tok
+
+    # --- Gemini (无缓存,需重新扫描取 year 总量) ---
+    try:
+        bounds = range_bounds()
+        gm = scan_gemini(bounds)
+        yr = gm["ranges"].get("year", {})
+        gm_tok = yr.get("in", 0) + yr.get("out", 0) + yr.get("cached", 0) + yr.get("thoughts", 0)
+        total_tokens += gm_tok
+        total_cost += yr.get("cost", 0)
+    except Exception:
+        pass
+
+    # --- Grok (无缓存,需重新扫描取 year 总量) ---
+    try:
+        gk = scan_grok(bounds)
+        gk_tok = gk["ranges"].get("year", {}).get("tokens", 0)
+        total_tokens += gk_tok
+    except Exception:
+        pass
+
     active = sorted(day_tokens.keys())
     streak_max, streak_cur = _streak_info(active)
     busiest_dk, busiest_tok = (max(day_tokens.items(), key=lambda kv: kv[1])
@@ -1868,8 +1942,9 @@ def wrapped():
         ({"name": p, "tokens": v[0], "cost": round(v[1], 2)} for p, v in proj_tok.items()),
         key=lambda x: -x["tokens"])[:8]
     max_projs_day = max((len(s) for s in day_projs.values()), default=0)
+    hours_total = sum(hours)
     night = sum(hours[0:6])
-    night_share = round(night / total_tokens * 100, 1) if total_tokens else 0.0
+    night_share = round(night / hours_total * 100, 1) if hours_total else 0.0
 
     ach = []
     def add(icon, title, desc, tint):
@@ -1910,7 +1985,8 @@ def wrapped():
         add("square.grid.3x3.fill", "多线作战", f"单日 {max_projs_day} 个项目", "blue")
     elif max_projs_day >= 3:
         add("square.grid.2x2.fill", "多面手", f"单日 {max_projs_day} 个项目", "blue")
-    top_share = (max(v[0] for v in proj_tok.values()) / total_tokens * 100) if (proj_tok and total_tokens) else 0
+    claude_tokens = sum(v[0] for v in proj_tok.values())
+    top_share = (max(v[0] for v in proj_tok.values()) / claude_tokens * 100) if (proj_tok and claude_tokens) else 0
     if top_share >= 50:
         add("scope", "专一", f"主项目占 {top_share:.0f}%", "blue")
     if len(proj_tok) >= 10:
@@ -1919,10 +1995,11 @@ def wrapped():
     # 作息彩蛋(紫)
     if night_share >= 5:
         add("moon.stars.fill", "夜猫子", f"{night_share:.0f}% 在凌晨", "purple")
-    morning_share = (sum(hours[5:9]) / total_tokens * 100) if total_tokens else 0
+    morning_share = (sum(hours[5:9]) / hours_total * 100) if hours_total else 0
     if morning_share >= 12:
         add("sunrise.fill", "早起鸟", f"{morning_share:.0f}% 在清晨", "purple")
-    weekend_share = ((weekday[5] + weekday[6]) / total_tokens * 100) if total_tokens else 0
+    weekday_total = sum(weekday)
+    weekend_share = ((weekday[5] + weekday[6]) / weekday_total * 100) if weekday_total else 0
     if weekend_share >= 30:
         add("beach.umbrella.fill", "周末战士", f"周末占 {weekend_share:.0f}%", "purple")
 
