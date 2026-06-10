@@ -111,19 +111,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let s = NSMutableAttributedString()
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
 
-        // 一格 = 时钟图标 + 5h/周剩余%,按家族品牌色着色(橙=Claude 青=Codex)。
-        func seg(_ value: String, _ color: NSColor) {
+        // 一格 = 工具标识 + 5h/周剩余%,按家族品牌色着色(橙=Claude 青=Codex)。
+        func seg(_ label: String, _ value: String, _ color: NSColor) {
             if s.length > 0 {
                 s.append(NSAttributedString(string: "  ", attributes: [.font: font]))
             }
-            let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
-            let img = NSImage(systemSymbolName: "clock.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(cfg)
-            img?.isTemplate = false
-            let att = NSTextAttachment(); att.image = img
-            s.append(NSAttributedString(attachment: att))
-            s.append(NSAttributedString(string: " " + value,
+            let text = label.isEmpty ? value : "\(label) \(value)"
+            s.append(NSAttributedString(string: text,
                 attributes: [.font: font, .baselineOffset: 1, .foregroundColor: color]))
         }
 
@@ -150,11 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let u = store.usage {
-            if let q = quotaText(fiveHour: u.claude.q5, weekly: u.claude.q7) { seg(q, Self.claudeColor) }
-            if let p = quotaText(fiveHour: u.codex.p5, weekly: u.codex.pw) { seg(p, Self.codexColor) }
-            if s.length == 0 { seg("—", .secondaryLabelColor) }   // 两家额度都暂缺
+            if let q = quotaText(fiveHour: u.claude.q5, weekly: u.claude.q7) { seg("CC", q, Self.claudeColor) }
+            if let p = quotaText(fiveHour: u.codex.p5, weekly: u.codex.pw) { seg("Codex", p, Self.codexColor) }
+            if s.length == 0 { seg("", "—", .secondaryLabelColor) }   // 两家额度都暂缺
         } else {
-            seg("…", .secondaryLabelColor)                        // 加载中
+            seg("", "…", .secondaryLabelColor)                        // 加载中
         }
         b.attributedTitle = s
         b.image = nil
