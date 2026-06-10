@@ -20,23 +20,11 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
 
     private let apiURL = URL(string: "https://api.github.com/repos/cclank/tokei/releases/latest")!
     private var downloadTask: URLSessionDownloadTask?
-    private var checkTimer: Timer?
     private lazy var session: URLSession = {
         URLSession(configuration: .default, delegate: self, delegateQueue: .main)
     }()
 
     static let shared = Updater()
-
-    override init() {
-        super.init()
-    }
-
-    func startPeriodicCheck() {
-        checkForUpdate()
-        checkTimer = Timer.scheduledTimer(withTimeInterval: 4 * 3600, repeats: true) { [weak self] _ in
-            self?.checkForUpdate()
-        }
-    }
 
     private static func isNewer(remote: String, local: String) -> Bool {
         let parse: (String) -> [Int] = { v in

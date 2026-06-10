@@ -88,7 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         store.refresh()
         store.sitReminder.updateRunning()
-        Updater.shared.startPeriodicCheck()
+        Updater.shared.checkForUpdate()
+        autoFetchPricingIfNeeded()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.store.refresh()
         }
@@ -147,6 +148,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         b.attributedTitle = s
         b.image = nil
+    }
+
+    func autoFetchPricingIfNeeded() {
+        let pricingPath = (NSHomeDirectory() as NSString).appendingPathComponent(".tokei/pricing.json")
+        guard !FileManager.default.fileExists(atPath: pricingPath) else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            proc.arguments = ["python3", DataLoader.scriptPath, "--update-prices"]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            try? proc.run()
+            proc.waitUntilExit()
+            DispatchQueue.main.async { self?.store.refresh() }
+        }
     }
 
     @objc func togglePopover() {
