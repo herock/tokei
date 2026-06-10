@@ -111,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let s = NSMutableAttributedString()
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
 
-        // 一格 = 时钟图标 + 5h 剩余%,按家族品牌色着色(橙=Claude 青=Codex)。
+        // 一格 = 时钟图标 + 5h/周剩余%,按家族品牌色着色(橙=Claude 青=Codex)。
         func seg(_ value: String, _ color: NSColor) {
             if s.length > 0 {
                 s.append(NSAttributedString(string: "  ", attributes: [.font: font]))
@@ -127,6 +127,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 attributes: [.font: font, .baselineOffset: 1, .foregroundColor: color]))
         }
 
+        func pct(_ used: Double) -> String {
+            String(format: "%.0f%%", 100 - used)
+        }
+
+        func quotaText(fiveHour: Double?, weekly: Double?) -> String? {
+            guard fiveHour != nil || weekly != nil else { return nil }
+            if let weekly {
+                return "\(fiveHour.map(pct) ?? "—") | \(pct(weekly))"
+            }
+            return fiveHour.map(pct)
+        }
+
         if store.keepAwake.active {
             let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [Self.claudeColor]))
@@ -138,8 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let u = store.usage {
-            if let q5 = u.claude.q5 { seg(String(format: "%.0f", 100 - q5), Self.claudeColor) }
-            if let p5 = u.codex.p5 { seg(String(format: "%.0f", 100 - p5), Self.codexColor) }
+            if let q = quotaText(fiveHour: u.claude.q5, weekly: u.claude.q7) { seg(q, Self.claudeColor) }
+            if let p = quotaText(fiveHour: u.codex.p5, weekly: u.codex.pw) { seg(p, Self.codexColor) }
             if s.length == 0 { seg("—", .secondaryLabelColor) }   // 两家额度都暂缺
         } else {
             seg("…", .secondaryLabelColor)                        // 加载中
