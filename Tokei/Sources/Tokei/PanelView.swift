@@ -246,7 +246,7 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 11) {
             cardHead("Codex", tint: Theme.codex, sessions: r.sessions)
             if r.sessions > 0 {
-                CostHeadline(value: Fmt.human(r.in + r.cached + r.out + r.reason), caption: "\(sel.label) 总量", tint: Theme.codex)
+                CostHeadline(value: Fmt.human(r.in + r.cached + r.out), caption: "\(sel.label) 总量", tint: Theme.codex)
                 metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
                     hit: r.hit, extra: {
                     var items: [Metric] = [

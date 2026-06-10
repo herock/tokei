@@ -331,7 +331,7 @@ def scan_claude(bounds, cache):
 
     stale = set(fc.keys())
 
-    for f in glob.glob(os.path.join(CLAUDE_DIR, "*", "*.jsonl")):
+    for f in glob.glob(os.path.join(CLAUDE_DIR, "**", "*.jsonl"), recursive=True):
         stale.discard(f)
         try:
             st = os.stat(f)
@@ -1597,7 +1597,7 @@ def update_prices():
 def _scan_local_models():
     """扫描本地所有日志,收集出现过的模型名。"""
     models = set()
-    for f in glob.glob(os.path.join(CLAUDE_DIR, "*", "*.jsonl")):
+    for f in glob.glob(os.path.join(CLAUDE_DIR, "**", "*.jsonl"), recursive=True):
         try:
             for line in open(f, encoding="utf-8", errors="ignore"):
                 if '"model"' not in line:
