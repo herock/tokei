@@ -157,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 s.append(NSAttributedString(string: "  ", attributes: [.font: font]))
             }
             s.append(NSAttributedString(string: Fmt.human(value),
-                attributes: [.font: font, .baselineOffset: 1, .foregroundColor: NSColor.secondaryLabelColor]))
+                attributes: [.font: font, .baselineOffset: 1, .foregroundColor: NSColor.labelColor]))
             return true
         }
 
@@ -172,16 +172,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let u = store.usage {
-            var showedTodayTokens = false
             if showMenuBarTodayTokens {
-                showedTodayTokens = appendTodayTokens(todayTokens(u))
+                _ = appendTodayTokens(todayTokens(u))
             }
-            let beforeQuota = s.length
             if let q = quotaText(fiveHour: u.claude.q5, weekly: u.claude.q7) { seg("CC", q, Self.claudeColor) }
             if let p = quotaText(fiveHour: u.codex.p5, weekly: u.codex.pw) { seg("Codex", p, Self.codexColor) }
-            if showedTodayTokens && s.length > beforeQuota {
-                s.replaceCharacters(in: NSRange(location: beforeQuota, length: 2), with: " · ")
-            }
             if s.length == 0 { seg("", "—", .secondaryLabelColor) }   // 两家额度都暂缺
         } else {
             seg("", "…", .secondaryLabelColor)                        // 加载中
