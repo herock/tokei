@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var popover = NSPopover()
     var timer: Timer?
     var globalMouseMonitor: Any?
+    @AppStorage("showMenuBarTodayTokens") var showMenuBarTodayTokens = true
 
     // 菜单栏家族品牌色(与面板 Theme.claude/codex 一致)。
     static let claudeColor = NSColor(red: 0.92, green: 0.52, blue: 0.40, alpha: 1)
@@ -133,6 +134,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return fiveHour.map(pct)
         }
 
+        func todayTokens(_ u: Usage) -> Int {
+            let claude = u.claude.ranges.today
+            let codex = u.codex.ranges.today
+            let gemini = u.gemini.ranges.today
+            let qoder = u.qoder.ranges.today
+            let hermes = u.hermes.ranges.today
+            let openclaw = u.openclaw.ranges.today
+            let opencode = u.opencode.ranges.today
+            return claude.in + claude.out + claude.cr + claude.cw
+                + codex.in + codex.cached + codex.out + codex.reason
+                + gemini.in + gemini.cached + gemini.out + gemini.thoughts
+                + qoder.in + qoder.out
+                + hermes.in + hermes.out + hermes.cr + hermes.cw + hermes.reason
+                + openclaw.in + openclaw.out + openclaw.cr + openclaw.cw
+                + opencode.in + opencode.out + opencode.cr + opencode.cw + opencode.reason
+        }
+
+        func appendTodayTokens(_ value: Int) -> Bool {
+            guard value > 0 else { return false }
+            if s.length > 0 {
+                s.append(NSAttributedString(string: "  ", attributes: [.font: font]))
+            }
+            s.append(NSAttributedString(string: Fmt.human(value),
+                attributes: [.font: font, .baselineOffset: 1, .foregroundColor: NSColor.secondaryLabelColor]))
+            return true
+        }
+
         if store.keepAwake.active {
             let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [Self.claudeColor]))
@@ -144,8 +172,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let u = store.usage {
+            var showedTodayTokens = false
+            if showMenuBarTodayTokens {
+                showedTodayTokens = appendTodayTokens(todayTokens(u))
+            }
+            let beforeQuota = s.length
             if let q = quotaText(fiveHour: u.claude.q5, weekly: u.claude.q7) { seg("CC", q, Self.claudeColor) }
             if let p = quotaText(fiveHour: u.codex.p5, weekly: u.codex.pw) { seg("Codex", p, Self.codexColor) }
+            if showedTodayTokens && s.length > beforeQuota {
+                s.replaceCharacters(in: NSRange(location: beforeQuota, length: 2), with: " · ")
+            }
             if s.length == 0 { seg("", "—", .secondaryLabelColor) }   // 两家额度都暂缺
         } else {
             seg("", "…", .secondaryLabelColor)                        // 加载中

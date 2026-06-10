@@ -18,6 +18,7 @@ struct PanelView: View {
     @AppStorage("showHermes") private var showHermes = true
     @AppStorage("showOpenClaw") private var showOpenClaw = true
     @AppStorage("showOpenCode") private var showOpenCode = true
+    @AppStorage("showMenuBarTodayTokens") private var showMenuBarTodayTokens = true
 
     private var visibleCount: Int {
         [showClaude, showCodex, showGemini, showGrok, showQoder, showHermes, showOpenClaw, showOpenCode].filter { $0 }.count
@@ -703,6 +704,7 @@ struct PanelView: View {
             HStack(alignment: .top, spacing: 11) {
                 VStack(alignment: .leading, spacing: 11) {
                     settingsAgentsSection
+                    settingsMenuBarSection
                     settingsDiagnosticsSection
                     settingsPricingSection
                 }
@@ -760,6 +762,15 @@ struct PanelView: View {
                 settingsRow("OpenClaw", tint: Theme.openclaw, isOn: $showOpenClaw)
                 settingsRow("OpenCode", tint: Theme.opencode, isOn: $showOpenCode)
             }
+        }
+    }
+
+    var settingsMenuBarSection: some View {
+        settingsSection("menubar.rectangle", "菜单栏") {
+            settingsToggleRow("今日 Token 总量", isOn: $showMenuBarTodayTokens)
+                .onChange(of: showMenuBarTodayTokens) { _ in
+                    (NSApp.delegate as? AppDelegate)?.updateStatusTitle()
+                }
         }
     }
 
