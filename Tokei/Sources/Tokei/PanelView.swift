@@ -247,7 +247,7 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 11) {
             cardHead("Codex", tint: Theme.codex, sessions: r.sessions)
             if r.sessions > 0 {
-                CostHeadline(value: Fmt.human(r.in + r.cached + r.out + r.reason), caption: "\(sel.label) 总量", tint: Theme.codex)
+                CostHeadline(value: Fmt.human(r.in + r.cached + r.out), caption: "\(sel.label) 总量", tint: Theme.codex)
                 metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
                     hit: r.hit, extra: {
                     var items: [Metric] = [
@@ -683,7 +683,7 @@ struct PanelView: View {
         }
     }
 
-    @StateObject private var updater = Updater()
+    @ObservedObject private var updater = Updater.shared
     @State private var priceUpdating = false
     @State private var priceResult = ""
     @State private var debugRunning = false
@@ -720,7 +720,6 @@ struct PanelView: View {
 
         }
         .onAppear {
-            updater.checkForUpdate()
             if let cfg = SyncManager.loadConfig() {
                 if syncDir.isEmpty && !cfg.sync_dir.isEmpty {
                     let expanded = (cfg.sync_dir as NSString).expandingTildeInPath
@@ -1092,11 +1091,11 @@ struct PanelView: View {
         case .checking:
             ProgressView()
                 .controlSize(.mini)
-        case .available(let tag, _):
+        case .available(let tag, let url):
             Button {
-                updater.performUpdate()
+                NSWorkspace.shared.open(url)
             } label: {
-                Text("\(tag) 可更新")
+                Text("官方 \(tag)")
                     .font(.system(size: 8, weight: .medium))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 5)
@@ -1104,25 +1103,28 @@ struct PanelView: View {
                     .background(Capsule().fill(.green))
             }
             .buttonStyle(.plain)
-        case .downloading(let p):
-            HStack(spacing: 4) {
-                ProgressView(value: p)
-                    .frame(width: 40)
-                Text("\(Int(p * 100))%")
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundStyle(Theme.tTertiary)
-            }
-        case .installing:
-            Text("安装中…")
-                .font(.system(size: 8))
-                .foregroundStyle(Theme.claude)
+            .tip("官方仓库有新版。请合并 upstream/main 后重新构建,避免覆盖定制版。")
         case .failed(let msg):
             Text(msg)
                 .font(.system(size: 8))
                 .foregroundStyle(.red)
                 .lineLimit(1)
+        case .upToDate:
+            Text("已是最新")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.green)
         case .idle:
-            EmptyView()
+            Button {
+                updater.checkForUpdate()
+            } label: {
+                Text("检查更新")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(Theme.tTertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+            }
+            .buttonStyle(.plain)
         }
     }
 

@@ -346,7 +346,7 @@ def scan_claude(bounds, cache):
 
     stale = set(fc.keys())
 
-    for f in glob.glob(os.path.join(CLAUDE_DIR, "*", "*.jsonl")):
+    for f in glob.glob(os.path.join(CLAUDE_DIR, "**", "*.jsonl"), recursive=True):
         stale.discard(f)
         try:
             st = os.stat(f)
@@ -362,6 +362,7 @@ def scan_claude(bounds, cache):
             days = {}
             hours = [0] * 24
             proj = None
+            seen_mids = set()
             try:
                 with open(f, "r", encoding="utf-8", errors="ignore") as fh:
                     for line in fh:
@@ -370,6 +371,11 @@ def scan_claude(bounds, cache):
                         u = _claude_usage(line, want_dt=True)
                         if not u:
                             continue
+                        mid = u.get("mid")
+                        if mid:
+                            if mid in seen_mids:
+                                continue
+                            seen_mids.add(mid)
                         dt = u["dt"]
                         dk = dt.date().isoformat()
                         day = days.setdefault(dk, {"in": 0, "out": 0, "cr": 0, "cw": 0,
@@ -462,7 +468,7 @@ def _claude_usage(line, want_dt=False):
         write_cost = (w5 or 0) / 1e6 * p["write5m"] + (w1 or 0) / 1e6 * p["write1h"]
     cost = inp / 1e6 * p["in"] + out / 1e6 * p["out"] + cr / 1e6 * p["cache_read"] + write_cost
     res = {"in": inp, "out": out, "cr": cr, "cw": cw, "cost": cost,
-           "model": msg.get("model"), "cwd": o.get("cwd")}
+           "model": msg.get("model"), "cwd": o.get("cwd"), "mid": msg.get("id")}
     if want_dt:
         res["dt"] = dt
     return res
@@ -1416,10 +1422,17 @@ def compute():
     cur_total = cur["in"] + cur["out"] + cur["cr"] + cur["cw"]
 
     lim = cx["limits"] or {}
+    now_epoch = int(datetime.now().timestamp())
     p5 = (lim.get("primary") or {}).get("used_percent")
     pw = (lim.get("secondary") or {}).get("used_percent")
     r5 = (lim.get("primary") or {}).get("resets_at")
     rw = (lim.get("secondary") or {}).get("resets_at")
+    if r5 and now_epoch > r5:
+        p5 = 0.0
+        r5 = None
+    if rw and now_epoch > rw:
+        pw = 0.0
+        rw = None
 
     plan = _safe_scan("claude_plan", scan_claude_plan, lambda: {}, errors) or {}
 
@@ -1613,7 +1626,7 @@ def update_prices():
 def _scan_local_models():
     """扫描本地所有日志,收集出现过的模型名。"""
     models = set()
-    for f in glob.glob(os.path.join(CLAUDE_DIR, "*", "*.jsonl")):
+    for f in glob.glob(os.path.join(CLAUDE_DIR, "**", "*.jsonl"), recursive=True):
         try:
             for line in open(f, encoding="utf-8", errors="ignore"):
                 if '"model"' not in line:

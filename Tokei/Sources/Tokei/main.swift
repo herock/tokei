@@ -89,6 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         store.refresh()
         store.sitReminder.updateRunning()
+        Updater.shared.checkForUpdate()
+        autoFetchPricing()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.store.refresh()
         }
@@ -143,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let openclaw = u.openclaw.ranges.today
             let opencode = u.opencode.ranges.today
             return claude.in + claude.out + claude.cr + claude.cw
-                + codex.in + codex.cached + codex.out + codex.reason
+                + codex.in + codex.cached + codex.out
                 + gemini.in + gemini.cached + gemini.out + gemini.thoughts
                 + qoder.in + qoder.out
                 + hermes.in + hermes.out + hermes.cr + hermes.cw + hermes.reason
@@ -183,6 +185,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         b.attributedTitle = s
         b.image = nil
+    }
+
+    func autoFetchPricing() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            proc.arguments = ["python3", DataLoader.scriptPath, "--update-prices"]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            try? proc.run()
+            proc.waitUntilExit()
+            DispatchQueue.main.async { self?.store.refresh() }
+        }
     }
 
     @objc func togglePopover() {
