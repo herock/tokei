@@ -230,7 +230,22 @@ def human(n: float) -> str:
 # ---------- 增量扫描缓存 ----------
 import tempfile as _tempfile
 _SCAN_CACHE_FILE = os.path.join(_tempfile.gettempdir(), "_tokei_scan_cache.json")
-_SCAN_CACHE_VERSION = 3
+_SCAN_CACHE_VERSION = 4
+
+
+def _sqlite_sig(path):
+    parts = []
+    try:
+        os.stat(path)
+    except OSError:
+        return None
+    for p in (path, f"{path}-wal"):
+        try:
+            st = os.stat(p)
+            parts.append(f"{os.path.basename(p)}:{st.st_mtime_ns}:{st.st_size}")
+        except OSError:
+            parts.append(f"{os.path.basename(p)}:-")
+    return "|".join(parts)
 
 
 def _load_scan_cache():
@@ -778,9 +793,8 @@ def scan_qoder(bounds, cache):
     if not os.path.isfile(_QODER_DB):
         return {"ranges": empty}
 
-    try:
-        sig = f"{os.path.getmtime(_QODER_DB)}:{os.path.getsize(_QODER_DB)}"
-    except OSError:
+    sig = _sqlite_sig(_QODER_DB)
+    if not sig:
         return {"ranges": empty}
 
     entry = fc.get("db")
@@ -807,9 +821,11 @@ def scan_qoder(bounds, cache):
                                 "duration": int(dur or 0), "ctx_ratio": float(ctx or 0)}
             conn.close()
         except Exception:
-            pass
-        fc["db"] = {"sig": sig, "days": days}
-        entry = fc["db"]
+            if not entry:
+                raise
+        else:
+            fc["db"] = {"sig": sig, "days": days}
+            entry = fc["db"]
 
     today_d = bounds["today"].date()
     yest_d = bounds["yesterday"].date()
@@ -894,9 +910,8 @@ def scan_hermes(bounds, cache):
                  "sessions": 0, "models": {}} for k in RANGE_KEYS}
     if not os.path.isfile(HERMES_DB):
         return {"ranges": empty}
-    try:
-        sig = f"{os.path.getmtime(HERMES_DB)}:{os.path.getsize(HERMES_DB)}"
-    except OSError:
+    sig = _sqlite_sig(HERMES_DB)
+    if not sig:
         return {"ranges": empty}
     entry = fc.get("db")
     if not entry or entry.get("sig") != sig:
@@ -929,9 +944,11 @@ def scan_hermes(bounds, cache):
                     mm["in"] += int(ti); mm["out"] += int(to_); mm["cost"] += float(cost)
             conn.close()
         except Exception:
-            pass
-        fc["db"] = {"sig": sig, "days": days}
-        entry = fc["db"]
+            if not entry:
+                raise
+        else:
+            fc["db"] = {"sig": sig, "days": days}
+            entry = fc["db"]
 
     today_d = bounds["today"].date()
     yest_d = bounds["yesterday"].date()
@@ -995,10 +1012,7 @@ def scan_openclaw(bounds, cache):
 
     # --- Part 1: SQLite task counts ---
     if os.path.isfile(OPENCLAW_DB):
-        try:
-            sig = f"{os.path.getmtime(OPENCLAW_DB)}:{os.path.getsize(OPENCLAW_DB)}"
-        except OSError:
-            sig = None
+        sig = _sqlite_sig(OPENCLAW_DB)
         if sig:
             entry = fc.get("_db")
             if not entry or entry.get("sig") != sig:
@@ -1019,8 +1033,10 @@ def scan_openclaw(bounds, cache):
                                              "failed": int(failed or 0)}
                     conn.close()
                 except Exception:
-                    pass
-                fc["_db"] = {"sig": sig, "days": task_days}
+                    if not entry:
+                        raise
+                else:
+                    fc["_db"] = {"sig": sig, "days": task_days}
             for dk, day in fc.get("_db", {}).get("days", {}).items():
                 try:
                     d = date.fromisoformat(dk)
