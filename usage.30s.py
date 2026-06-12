@@ -248,6 +248,16 @@ def _sqlite_sig(path):
     return "|".join(parts)
 
 
+def _hermes_dbs():
+    paths = []
+    if os.path.isfile(HERMES_DB):
+        paths.append(HERMES_DB)
+    for p in glob.glob(os.path.join(HOME, ".hermes", "profiles", "*", "state.db")):
+        if os.path.isfile(p):
+            paths.append(p)
+    return sorted(set(paths))
+
+
 def _load_scan_cache():
     try:
         with open(_SCAN_CACHE_FILE, "r") as f:
@@ -914,47 +924,57 @@ def scan_hermes(bounds, cache):
     fc = cache.setdefault("hermes", {})
     empty = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0, "cost": 0.0,
                  "sessions": 0, "models": {}} for k in RANGE_KEYS}
-    if not os.path.isfile(HERMES_DB):
+    dbs = _hermes_dbs()
+    if not dbs:
         return {"ranges": empty}
-    sig = _sqlite_sig(HERMES_DB)
-    if not sig:
-        return {"ranges": empty}
-    entry = fc.get("db")
-    if not entry or entry.get("sig") != sig:
-        days = {}
-        try:
-            conn = _sq.connect(f"file:{HERMES_DB}?mode=ro", uri=True)
-            for row in conn.execute("""
-                SELECT date(started_at,'unixepoch','localtime') as day,
-                       COUNT(*) as cnt, model,
-                       COALESCE(SUM(input_tokens),0),
-                       COALESCE(SUM(output_tokens),0),
-                       COALESCE(SUM(cache_read_tokens),0),
-                       COALESCE(SUM(cache_write_tokens),0),
-                       COALESCE(SUM(reasoning_tokens),0),
-                       COALESCE(SUM(COALESCE(actual_cost_usd,estimated_cost_usd)),0)
-                FROM sessions WHERE started_at > 0
-                GROUP BY day, model
-            """):
-                dk, cnt, model, ti, to_, cr, cw, reason, cost = row
-                if not dk:
+
+    stale = set(fc.keys())
+    entries = []
+    for db in dbs:
+        stale.discard(db)
+        sig = _sqlite_sig(db)
+        if not sig:
+            continue
+        entry = fc.get(db)
+        if not entry or entry.get("sig") != sig:
+            days = {}
+            try:
+                conn = _sq.connect(f"file:{db}?mode=ro", uri=True)
+                for row in conn.execute("""
+                    SELECT date(started_at,'unixepoch','localtime') as day,
+                           COUNT(*) as cnt, model,
+                           COALESCE(SUM(input_tokens),0),
+                           COALESCE(SUM(output_tokens),0),
+                           COALESCE(SUM(cache_read_tokens),0),
+                           COALESCE(SUM(cache_write_tokens),0),
+                           COALESCE(SUM(reasoning_tokens),0),
+                           COALESCE(SUM(COALESCE(actual_cost_usd,estimated_cost_usd)),0)
+                    FROM sessions WHERE started_at > 0
+                    GROUP BY day, model
+                """):
+                    dk, cnt, model, ti, to_, cr, cw, reason, cost = row
+                    if not dk:
+                        continue
+                    day = days.setdefault(dk, {"in": 0, "out": 0, "cr": 0, "cw": 0,
+                                               "reason": 0, "cost": 0.0, "sessions": 0, "models": {}})
+                    day["in"] += int(ti); day["out"] += int(to_)
+                    day["cr"] += int(cr); day["cw"] += int(cw)
+                    day["reason"] += int(reason); day["cost"] += float(cost)
+                    day["sessions"] += int(cnt)
+                    if model:
+                        mm = day["models"].setdefault(model, {"in": 0, "out": 0, "cost": 0.0})
+                        mm["in"] += int(ti); mm["out"] += int(to_); mm["cost"] += float(cost)
+                conn.close()
+            except Exception:
+                if not entry:
                     continue
-                day = days.setdefault(dk, {"in": 0, "out": 0, "cr": 0, "cw": 0,
-                                           "reason": 0, "cost": 0.0, "sessions": 0, "models": {}})
-                day["in"] += int(ti); day["out"] += int(to_)
-                day["cr"] += int(cr); day["cw"] += int(cw)
-                day["reason"] += int(reason); day["cost"] += float(cost)
-                day["sessions"] += int(cnt)
-                if model:
-                    mm = day["models"].setdefault(model, {"in": 0, "out": 0, "cost": 0.0})
-                    mm["in"] += int(ti); mm["out"] += int(to_); mm["cost"] += float(cost)
-            conn.close()
-        except Exception:
-            if not entry:
-                raise
-        else:
-            fc["db"] = {"sig": sig, "days": days}
-            entry = fc["db"]
+            else:
+                fc[db] = {"sig": sig, "days": days}
+                entry = fc[db]
+        if entry:
+            entries.append(entry)
+    for p in stale:
+        fc.pop(p, None)
 
     today_d = bounds["today"].date()
     yest_d = bounds["yesterday"].date()
@@ -964,26 +984,27 @@ def scan_hermes(bounds, cache):
 
     B = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0, "cost": 0.0,
              "sessions": 0, "models": {}} for k in RANGE_KEYS}
-    for dk, day in entry.get("days", {}).items():
-        try:
-            d = date.fromisoformat(dk)
-        except ValueError:
-            continue
-        ks = []
-        if d == today_d: ks.append("today")
-        if d == yest_d: ks.append("yesterday")
-        if d >= week_d: ks.append("week")
-        if d >= month_d: ks.append("month")
-        if d >= year_d: ks.append("year")
-        for k in ks:
-            b = B[k]
-            b["in"] += day["in"]; b["out"] += day["out"]
-            b["cr"] += day["cr"]; b["cw"] += day["cw"]
-            b["reason"] += day["reason"]; b["cost"] += day["cost"]
-            b["sessions"] += day["sessions"]
-            for mn, mv in day.get("models", {}).items():
-                mm = b["models"].setdefault(mn, {"in": 0, "out": 0, "cost": 0.0})
-                mm["in"] += mv["in"]; mm["out"] += mv["out"]; mm["cost"] += mv["cost"]
+    for entry in entries:
+        for dk, day in entry.get("days", {}).items():
+            try:
+                d = date.fromisoformat(dk)
+            except ValueError:
+                continue
+            ks = []
+            if d == today_d: ks.append("today")
+            if d == yest_d: ks.append("yesterday")
+            if d >= week_d: ks.append("week")
+            if d >= month_d: ks.append("month")
+            if d >= year_d: ks.append("year")
+            for k in ks:
+                b = B[k]
+                b["in"] += day["in"]; b["out"] += day["out"]
+                b["cr"] += day["cr"]; b["cw"] += day["cw"]
+                b["reason"] += day["reason"]; b["cost"] += day["cost"]
+                b["sessions"] += day["sessions"]
+                for mn, mv in day.get("models", {}).items():
+                    mm = b["models"].setdefault(mn, {"in": 0, "out": 0, "cost": 0.0})
+                    mm["in"] += mv["in"]; mm["out"] += mv["out"]; mm["cost"] += mv["cost"]
     return {"ranges": B}
 
 
