@@ -371,6 +371,9 @@ struct PanelView: View {
                     if r.in > 0 {
                         items.append(.init("arrow.down", "输入", Fmt.human(r.in)))
                     }
+                    if r.out > 0 {
+                        items.append(.init("arrow.up", "输出", Fmt.human(r.out)))
+                    }
                     return items
                 }(), tint: Theme.qoder)
                 if let quota = q.quota {

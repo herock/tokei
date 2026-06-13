@@ -799,6 +799,8 @@ def scan_grok(bounds):
 # QoderWork SQLite:~/Library/Application Support/QoderWork/data/agents.db
 # messages 表 metadata 含 durationMs / contextUsageRatio(token 字段目前全 0)。
 _QODER_DB = os.path.join(HOME, "Library", "Application Support", "QoderWork", "data", "agents.db")
+_QODER_CLI_SESSION_LOGS = os.path.join(QODER_DIR, "logs", "sessions")
+_QODER_CLI_RUNS = os.path.join(QODER_DIR, "logs", "runs")
 
 
 def scan_qoder(bounds, cache):
@@ -807,42 +809,98 @@ def scan_qoder(bounds, cache):
     empty = {k: {"in": 0, "out": 0, "sessions": 0, "calls": 0,
                  "duration": 0, "ctx_sum": 0.0, "ctx_count": 0}
              for k in RANGE_KEYS}
-    if not os.path.isfile(_QODER_DB):
+    if (not os.path.isfile(_QODER_DB)
+            and not os.path.isdir(_QODER_CLI_SESSION_LOGS)
+            and not os.path.isdir(_QODER_CLI_RUNS)):
         return {"ranges": empty}
 
-    sig = _sqlite_sig(_QODER_DB)
-    if not sig:
-        return {"ranges": empty}
+    stale = set(fc.keys())
+    entries = []
 
-    entry = fc.get("db")
-    if not entry or entry.get("sig") != sig:
-        days = {}
-        try:
-            conn = _sqlite3.connect(f"file:{_QODER_DB}?mode=ro", uri=True)
-            for row in conn.execute("""
-                SELECT date(created_at,'unixepoch','localtime') as day,
-                       COUNT(*) as calls,
-                       COUNT(DISTINCT chat_id) as sessions,
-                       COALESCE(SUM(json_extract(metadata,'$.inputTokens')),0),
-                       COALESCE(SUM(json_extract(metadata,'$.outputTokens')),0),
-                       COALESCE(SUM(json_extract(metadata,'$.durationMs')),0),
-                       COALESCE(AVG(CASE WHEN json_extract(metadata,'$.contextUsageRatio')>0
-                                    THEN json_extract(metadata,'$.contextUsageRatio') END),0)
-                FROM messages WHERE metadata!='{}'
-                GROUP BY day
-            """):
-                dk, calls, sessions, ti, to_, dur, ctx = row
-                if dk:
-                    days[dk] = {"calls": calls, "sessions": sessions,
-                                "in": int(ti or 0), "out": int(to_ or 0),
-                                "duration": int(dur or 0), "ctx_ratio": float(ctx or 0)}
-            conn.close()
-        except Exception:
-            if not entry:
-                raise
-        else:
-            fc["db"] = {"sig": sig, "days": days}
-            entry = fc["db"]
+    if os.path.isfile(_QODER_DB):
+        stale.discard("work_db")
+        sig = _sqlite_sig(_QODER_DB)
+        entry = fc.get("work_db") or fc.get("db")
+        if sig and (not entry or entry.get("sig") != sig):
+            days = {}
+            try:
+                conn = _sqlite3.connect(f"file:{_QODER_DB}?mode=ro", uri=True)
+                for row in conn.execute("""
+                    SELECT date(created_at,'unixepoch','localtime') as day,
+                           COUNT(*) as calls,
+                           COUNT(DISTINCT chat_id) as sessions,
+                           COALESCE(SUM(json_extract(metadata,'$.inputTokens')),0),
+                           COALESCE(SUM(json_extract(metadata,'$.outputTokens')),0),
+                           COALESCE(SUM(json_extract(metadata,'$.durationMs')),0),
+                           COALESCE(AVG(CASE WHEN json_extract(metadata,'$.contextUsageRatio')>0
+                                        THEN json_extract(metadata,'$.contextUsageRatio') END),0)
+                    FROM messages WHERE metadata!='{}'
+                    GROUP BY day
+                """):
+                    dk, calls, sessions, ti, to_, dur, ctx = row
+                    if dk:
+                        days[dk] = {"calls": int(calls or 0), "sessions": int(sessions or 0),
+                                    "in": int(ti or 0), "out": int(to_ or 0),
+                                    "duration": int(dur or 0), "ctx_ratio": float(ctx or 0)}
+                conn.close()
+            except Exception:
+                entry = entry if entry else None
+            else:
+                fc["work_db"] = {"sig": sig, "days": days}
+                fc.pop("db", None)
+                entry = fc["work_db"]
+        if entry:
+            entries.append(entry)
+
+    if os.path.isdir(_QODER_CLI_SESSION_LOGS):
+        for f in glob.glob(os.path.join(_QODER_CLI_SESSION_LOGS, "*", "*", "segments", "*.jsonl")):
+            key = "cli:" + f
+            stale.discard(key)
+            try:
+                st = os.stat(f)
+            except OSError:
+                continue
+            sig = f"{st.st_mtime_ns}:{st.st_size}"
+            entry = fc.get(key)
+            if not entry or entry.get("sig") != sig:
+                days = {}
+                session_id = os.path.basename(os.path.dirname(os.path.dirname(f)))
+                try:
+                    with open(f, "r", encoding="utf-8", errors="ignore") as fh:
+                        for line in fh:
+                            if '"model.response.completed"' not in line and '"turn.finished"' not in line:
+                                continue
+                            try:
+                                o = json.loads(line)
+                            except Exception:
+                                continue
+                            dt = parse_ts(o.get("ts", ""))
+                            if dt is None:
+                                continue
+                            data = o.get("data") if isinstance(o.get("data"), dict) else {}
+                            dk = dt.astimezone().date().isoformat()
+                            day = days.setdefault(dk, {"calls": 0, "sessions": set(), "in": 0, "out": 0,
+                                                       "duration": 0, "ctx_ratio": 0.0})
+                            typ = o.get("type")
+                            if typ == "model.response.completed":
+                                day["calls"] += 1
+                                day["sessions"].add(session_id)
+                                day["in"] += int(data.get("input_tokens", 0) or 0)
+                                day["out"] += int(data.get("output_tokens", 0) or 0)
+                            elif typ == "turn.finished":
+                                day["duration"] += int(data.get("duration_ms", 0) or 0)
+                                day["sessions"].add(session_id)
+                except OSError:
+                    continue
+                for day in days.values():
+                    day["sessions"] = sorted(day["sessions"])
+                fc[key] = {"sig": sig, "days": days}
+                entry = fc[key]
+            if entry:
+                entries.append(entry)
+
+    for p in stale:
+        fc.pop(p, None)
 
     today_d = bounds["today"].date()
     yest_d = bounds["yesterday"].date()
@@ -856,64 +914,82 @@ def scan_qoder(bounds, cache):
              "duration": 0, "ctx_sum": 0.0, "ctx_count": 0}
          for k in RANGE_KEYS}
 
-    for dk, day in entry.get("days", {}).items():
-        try:
-            d = date.fromisoformat(dk)
-        except ValueError:
-            continue
-        ks = []
-        if d == today_d: ks.append("today")
-        if d == yest_d: ks.append("yesterday")
-        if d >= week_d: ks.append("week")
-        if lw_start_d <= d < lw_end_d: ks.append("last_week")
-        if d >= month_d: ks.append("month")
-        if d >= year_d: ks.append("year")
-        for k in ks:
-            b = B[k]
-            b["in"] += day["in"]; b["out"] += day["out"]
-            b["sessions"] += day["sessions"]; b["calls"] += day["calls"]
-            b["duration"] += day["duration"]
-            if day["ctx_ratio"] > 0:
-                b["ctx_sum"] += day["ctx_ratio"] * day["calls"]
-                b["ctx_count"] += day["calls"]
+    for entry in entries:
+        for dk, day in entry.get("days", {}).items():
+            try:
+                d = date.fromisoformat(dk)
+            except ValueError:
+                continue
+            ks = []
+            if d == today_d: ks.append("today")
+            if d == yest_d: ks.append("yesterday")
+            if d >= week_d: ks.append("week")
+            if lw_start_d <= d < lw_end_d: ks.append("last_week")
+            if d >= month_d: ks.append("month")
+            if d >= year_d: ks.append("year")
+            for k in ks:
+                b = B[k]
+                b["in"] += int(day.get("in", 0) or 0)
+                b["out"] += int(day.get("out", 0) or 0)
+                sessions = day.get("sessions", 0)
+                b["sessions"] += len(sessions) if isinstance(sessions, list) else int(sessions or 0)
+                b["calls"] += int(day.get("calls", 0) or 0)
+                b["duration"] += int(day.get("duration", 0) or 0)
+                ctx_ratio = float(day.get("ctx_ratio", 0) or 0)
+                if ctx_ratio > 0:
+                    b["ctx_sum"] += ctx_ratio * int(day.get("calls", 0) or 0)
+                    b["ctx_count"] += int(day.get("calls", 0) or 0)
 
     # 从 QoderWork 日志提取最新 credit 额度
     quota = None
+    def quota_from_line(line):
+        if "userQuota" not in line:
+            return None
+        m = re.search(r"response:\s*(\{.*\})", line)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except Exception:
+                return None
+        if '"operation":"usage"' in line:
+            m = re.search(r'"data":(\{.*?"isQuotaExceeded":\w+)', line)
+            if m:
+                try:
+                    return json.loads(m.group(1) + "}")
+                except Exception:
+                    return None
+        return None
+
+    quota_logs = []
     qw_logs = os.path.join(HOME, "Library", "Application Support", "QoderWork", "logs")
     if os.path.isdir(qw_logs):
-        log_dirs = sorted(glob.glob(os.path.join(qw_logs, "2*")), reverse=True)
-        for ld in log_dirs[:2]:
-            main_log = os.path.join(ld, "main.log")
-            if not os.path.isfile(main_log):
-                continue
-            try:
-                with open(main_log, "r", encoding="utf-8", errors="ignore") as fh:
-                    for line in fh:
-                        if '"operation":"usage"' not in line or '"userQuota"' not in line:
-                            continue
-                        m = re.search(r'"data":(\{.*?"isQuotaExceeded":\w+)', line)
-                        if not m:
-                            continue
-                        try:
-                            quota = json.loads(m.group(1) + "}")
-                        except Exception:
-                            pass
-            except OSError:
-                pass
-            if quota:
-                break
+        quota_logs.extend(glob.glob(os.path.join(qw_logs, "2*", "main.log")))
+    if os.path.isdir(_QODER_CLI_RUNS):
+        quota_logs.extend(glob.glob(os.path.join(_QODER_CLI_RUNS, "*", "qodercli.log")))
+    for log_file in sorted(quota_logs, reverse=True):
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    found = quota_from_line(line)
+                    if found:
+                        quota = found
+        except OSError:
+            pass
+        if quota:
+            break
 
     # 当前模型
     model = None
-    try:
-        import sqlite3 as _sq
-        conn = _sq.connect(f"file:{_QODER_DB}?mode=ro", uri=True)
-        row = conn.execute("SELECT value FROM app_settings WHERE key='modelLevel'").fetchone()
-        if row:
-            model = row[0].strip('"')
-        conn.close()
-    except Exception:
-        pass
+    if os.path.isfile(_QODER_DB):
+        try:
+            import sqlite3 as _sq
+            conn = _sq.connect(f"file:{_QODER_DB}?mode=ro", uri=True)
+            row = conn.execute("SELECT value FROM app_settings WHERE key='modelLevel'").fetchone()
+            if row:
+                model = row[0].strip('"')
+            conn.close()
+        except Exception:
+            pass
 
     return {"ranges": B, "quota": quota, "model": model}
 
