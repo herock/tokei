@@ -24,6 +24,7 @@ GROK_DIR = os.path.join(HOME, ".grok", "sessions")
 QODER_DIR = os.path.join(HOME, ".qoder")
 HERMES_DB = os.path.join(HOME, ".hermes", "state.db")
 OPENCODE_DIR = os.path.join(HOME, ".local", "share", "opencode", "storage", "message")
+OPENCODE_DB = os.path.join(HOME, ".local", "share", "opencode", "opencode.db")
 OPENCLAW_DB = os.path.join(HOME, ".openclaw", "tasks", "runs.sqlite")
 OPENCLAW_AGENTS = os.path.join(HOME, ".openclaw", "agents")
 
@@ -1163,11 +1164,26 @@ def scan_openclaw(bounds, cache):
 # ---------- OpenCode ----------
 # JSON 文件: ~/.local/share/opencode/storage/message/<session>/msg_*.json
 # 每条 assistant 消息有 tokens{input,output,reasoning,cache{read,write}} + cost + modelID。
+def _opencode_model_id(raw):
+    if isinstance(raw, dict):
+        return raw.get("modelID") or raw.get("id") or raw.get("name") or ""
+    if isinstance(raw, str):
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                return obj.get("modelID") or obj.get("id") or obj.get("name") or raw
+        except Exception:
+            pass
+        return raw
+    return ""
+
+
 def scan_opencode(bounds, cache):
+    import sqlite3 as _sq
     fc = cache.setdefault("opencode", {})
     B = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0, "cost": 0.0,
              "sessions": set(), "models": {}} for k in RANGE_KEYS}
-    if not os.path.isdir(OPENCODE_DIR):
+    if not os.path.isdir(OPENCODE_DIR) and not os.path.isfile(OPENCODE_DB):
         return {"ranges": B}
 
     today_d = bounds["today"].date()
@@ -1177,50 +1193,129 @@ def scan_opencode(bounds, cache):
     year_d = bounds["year"].date()
 
     stale = set(fc.keys())
+    entries = []
 
-    for sess_dir in glob.glob(os.path.join(OPENCODE_DIR, "ses_*")):
-        for f in glob.glob(os.path.join(sess_dir, "msg_*.json")):
-            stale.discard(f)
+    db_loaded = False
+    if os.path.isfile(OPENCODE_DB):
+        stale.discard("_db")
+        sig = _sqlite_sig(OPENCODE_DB)
+        entry = fc.get("_db")
+        if sig and (not entry or entry.get("sig") != sig):
+            days = {}
             try:
-                st = os.stat(f)
-            except OSError:
-                continue
-            sig = f"{st.st_mtime}:{st.st_size}"
-            entry = fc.get(f)
-            if entry and entry.get("sig") == sig:
-                day_data = entry.get("day")
-            else:
+                conn = _sq.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True)
+                rows = conn.execute("""
+                    SELECT session_id, time_updated, data
+                    FROM message
+                    WHERE data LIKE '%"role":"assistant"%'
+                      AND data LIKE '%"tokens"%'
+                """)
+                for session_id, row_time, raw in rows:
+                    try:
+                        d = json.loads(raw)
+                    except Exception:
+                        continue
+                    if d.get("role") != "assistant":
+                        continue
+                    tok = d.get("tokens") or {}
+                    ca = tok.get("cache") or {}
+                    t = ((d.get("time") or {}).get("completed")
+                         or (d.get("time") or {}).get("created")
+                         or row_time)
+                    if not t:
+                        continue
+                    inp = int(tok.get("input", 0) or 0)
+                    out = int(tok.get("output", 0) or 0)
+                    reason = int(tok.get("reasoning", 0) or 0)
+                    cr = int(ca.get("read", 0) or 0)
+                    cw = int(ca.get("write", 0) or 0)
+                    cost = float(d.get("cost", 0) or 0)
+                    if inp == 0 and out == 0 and reason == 0 and cr == 0 and cw == 0 and cost == 0:
+                        continue
+                    dk = datetime.fromtimestamp(t / 1000).strftime("%Y-%m-%d")
+                    day = days.setdefault(dk, {"in": 0, "out": 0, "cr": 0, "cw": 0,
+                                               "reason": 0, "cost": 0.0, "sessions": set(), "models": {}})
+                    day["in"] += inp; day["out"] += out
+                    day["reason"] += reason; day["cr"] += cr; day["cw"] += cw; day["cost"] += cost
+                    if session_id:
+                        day["sessions"].add(session_id)
+                    model = d.get("modelID") or _opencode_model_id(d.get("model")) or ""
+                    if model:
+                        mm = day["models"].setdefault(model, {"in": 0, "out": 0, "cost": 0.0})
+                        mm["in"] += inp; mm["out"] += out; mm["cost"] += cost
+                conn.close()
+                for day in days.values():
+                    day["sessions"] = sorted(day["sessions"])
+                fc["_db"] = {"sig": sig, "days": days}
+                entry = fc["_db"]
+            except Exception:
+                if not entry:
+                    entry = None
+        if entry:
+            entries.append(entry)
+            db_loaded = True
+
+    if not db_loaded and os.path.isdir(OPENCODE_DIR):
+        for sess_dir in glob.glob(os.path.join(OPENCODE_DIR, "ses_*")):
+            for f in glob.glob(os.path.join(sess_dir, "msg_*.json")):
+                stale.discard(f)
                 try:
-                    d = json.load(open(f, encoding="utf-8"))
-                except Exception:
+                    st = os.stat(f)
+                except OSError:
                     continue
-                if d.get("role") != "assistant":
-                    fc[f] = {"sig": sig, "day": None}
-                    continue
-                t = (d.get("time") or {}).get("created", 0)
-                if not t:
-                    fc[f] = {"sig": sig, "day": None}
-                    continue
-                tok = d.get("tokens") or {}
-                ca = tok.get("cache") or {}
-                model = d.get("modelID", "")
-                day_data = {
-                    "date": datetime.fromtimestamp(t / 1000).strftime("%Y-%m-%d"),
-                    "in": tok.get("input", 0) or 0,
-                    "out": tok.get("output", 0) or 0,
-                    "reason": tok.get("reasoning", 0) or 0,
-                    "cr": ca.get("read", 0) or 0,
-                    "cw": ca.get("write", 0) or 0,
-                    "cost": d.get("cost", 0) or 0,
-                    "session": d.get("sessionID", ""),
-                    "model": model,
-                }
-                fc[f] = {"sig": sig, "day": day_data}
+                sig = f"{st.st_mtime}:{st.st_size}"
+                entry = fc.get(f)
+                if entry and entry.get("sig") == sig:
+                    day_data = entry.get("day")
+                else:
+                    try:
+                        d = json.load(open(f, encoding="utf-8"))
+                    except Exception:
+                        continue
+                    if d.get("role") != "assistant":
+                        fc[f] = {"sig": sig, "day": None}
+                        continue
+                    t = (d.get("time") or {}).get("created", 0)
+                    if not t:
+                        fc[f] = {"sig": sig, "day": None}
+                        continue
+                    tok = d.get("tokens") or {}
+                    ca = tok.get("cache") or {}
+                    model = d.get("modelID", "")
+                    day_data = {
+                        "date": datetime.fromtimestamp(t / 1000).strftime("%Y-%m-%d"),
+                        "in": tok.get("input", 0) or 0,
+                        "out": tok.get("output", 0) or 0,
+                        "reason": tok.get("reasoning", 0) or 0,
+                        "cr": ca.get("read", 0) or 0,
+                        "cw": ca.get("write", 0) or 0,
+                        "cost": d.get("cost", 0) or 0,
+                        "session": d.get("sessionID", ""),
+                        "model": model,
+                    }
+                    fc[f] = {"sig": sig, "day": day_data}
 
-            if not day_data:
-                continue
+                if not day_data:
+                    continue
+                entries.append({"days": {
+                    day_data["date"]: {
+                        "in": day_data["in"], "out": day_data["out"],
+                        "cr": day_data["cr"], "cw": day_data["cw"],
+                        "reason": day_data["reason"], "cost": day_data["cost"],
+                        "sessions": [day_data["session"]] if day_data["session"] else [],
+                        "models": ({day_data["model"]: {
+                            "in": day_data["in"], "out": day_data["out"], "cost": day_data["cost"]
+                        }} if day_data["model"] else {}),
+                    }
+                }})
+
+    for p in stale:
+        fc.pop(p, None)
+
+    for entry in entries:
+        for dk, day in entry.get("days", {}).items():
             try:
-                dd = date.fromisoformat(day_data["date"])
+                dd = date.fromisoformat(dk)
             except ValueError:
                 continue
             ks = []
@@ -1231,18 +1326,18 @@ def scan_opencode(bounds, cache):
             if dd >= year_d: ks.append("year")
             for k in ks:
                 b = B[k]
-                b["in"] += day_data["in"]; b["out"] += day_data["out"]
-                b["cr"] += day_data["cr"]; b["cw"] += day_data["cw"]
-                b["reason"] += day_data["reason"]; b["cost"] += day_data["cost"]
-                b["sessions"].add(day_data["session"])
-                mn = day_data["model"]
-                if mn:
+                b["in"] += day["in"]; b["out"] += day["out"]
+                b["cr"] += day["cr"]; b["cw"] += day["cw"]
+                b["reason"] += day["reason"]; b["cost"] += day["cost"]
+                for sid in day.get("sessions", []):
+                    if sid:
+                        b["sessions"].add(sid)
+                for mn, mv in day.get("models", {}).items():
+                    if not mn:
+                        continue
                     mm = b["models"].setdefault(mn, {"in": 0, "out": 0, "cost": 0.0})
-                    mm["in"] += day_data["in"]; mm["out"] += day_data["out"]
-                    mm["cost"] += day_data["cost"]
-
-    for p in stale:
-        fc.pop(p, None)
+                    mm["in"] += mv["in"]; mm["out"] += mv["out"]
+                    mm["cost"] += mv["cost"]
     return {"ranges": B}
 
 
