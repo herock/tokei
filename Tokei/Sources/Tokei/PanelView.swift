@@ -18,10 +18,11 @@ struct PanelView: View {
     @AppStorage("showHermes") private var showHermes = true
     @AppStorage("showOpenClaw") private var showOpenClaw = true
     @AppStorage("showOpenCode") private var showOpenCode = true
+    @AppStorage("showKilo") private var showKilo = true
     @AppStorage("showMenuBarTodayTokens") private var showMenuBarTodayTokens = true
 
     private var visibleCount: Int {
-        [showClaude, showCodex, showGemini, showGrok, showQoder, showHermes, showOpenClaw, showOpenCode].filter { $0 }.count
+        [showClaude, showCodex, showGemini, showGrok, showQoder, showHermes, showOpenClaw, showOpenCode, showKilo].filter { $0 }.count
     }
     private var useWide: Bool { visibleCount > 2 }
     private var panelWidth: CGFloat { useWide ? 640 : Theme.panelWidth }
@@ -71,6 +72,7 @@ struct PanelView: View {
                 let gr = u.gemini.ranges.get(sel), kr = u.grok.ranges.get(sel)
                 let qr = u.qoder.ranges.get(sel), hr = u.hermes.ranges.get(sel)
                 let lr = u.openclaw.ranges.get(sel), or = u.opencode.ranges.get(sel)
+                let kilor = u.kilo.ranges.get(sel)
                 let hasClaude = showClaude && cr.sessions > 0
                 let hasCodex  = showCodex  && xr.sessions > 0
                 let hasGemini = showGemini && gr.sessions > 0
@@ -79,6 +81,7 @@ struct PanelView: View {
                 let hasHermes = showHermes && hr.sessions > 0
                 let hasClaw   = showOpenClaw && (lr.tasks > 0 || lr.in + lr.out > 0)
                 let hasOCode  = showOpenCode && or.sessions > 0
+                let hasKilo   = showKilo && kilor.sessions > 0
                 SegmentedTabs(sel: $sel)
                 if useWide {
                     EqualHeightGrid() {
@@ -90,6 +93,7 @@ struct PanelView: View {
                         if hasHermes { Card(tint: Theme.hermes) { hermesBlock(hr) } }
                         if hasClaw   { Card(tint: Theme.openclaw) { openclawBlock(lr) } }
                         if hasOCode  { Card(tint: Theme.opencode) { opencodeBlock(or) } }
+                        if hasKilo   { Card(tint: Theme.kilo)    { kiloBlock(kilor) } }
                     }
                 } else {
                     if hasClaude { Card(tint: Theme.claude) { claudeBlock(u.claude, cr) } }
@@ -100,10 +104,11 @@ struct PanelView: View {
                     if hasHermes { Card(tint: Theme.hermes) { hermesBlock(hr) } }
                     if hasClaw   { Card(tint: Theme.openclaw) { openclawBlock(lr) } }
                     if hasOCode  { Card(tint: Theme.opencode) { opencodeBlock(or) } }
+                    if hasKilo   { Card(tint: Theme.kilo)    { kiloBlock(kilor) } }
                 }
                 inactiveToolsLine(hasClaude: hasClaude, hasCodex: hasCodex, hasGemini: hasGemini,
                                   hasGrok: hasGrok, hasQoder: hasQoder, hasHermes: hasHermes,
-                                  hasClaw: hasClaw, hasOCode: hasOCode)
+                                  hasClaw: hasClaw, hasOCode: hasOCode, hasKilo: hasKilo)
             } else {
                 HStack(spacing: 8) {
                     Spacer()
@@ -492,15 +497,40 @@ struct PanelView: View {
         }
     }
 
+    // MARK: - Kilo 卡片
+
+    func kiloBlock(_ r: KiloRange) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            cardHead("Kilo", tint: Theme.kilo, sessions: r.sessions)
+            if r.sessions > 0 {
+                CostHeadline(value: Fmt.human(r.in + r.out + r.cr + r.cw + r.reason), caption: "\(sel.label) 总量", tint: Theme.kilo)
+                metricGrid([.init("dollarsign.circle", "≈成本", String(format: "$%.2f", r.cost))],
+                    hit: r.hit, extra: {
+                    var items: [Metric] = [
+                        .init("arrow.down", "输入", Fmt.human(r.in)),
+                        .init("arrow.up", "输出", Fmt.human(r.out)),
+                        .init("bolt.fill", "缓存读", Fmt.human(r.cr)),
+                        .init("square.stack.3d.up.fill", "缓存写", Fmt.human(r.cw)),
+                    ]
+                    if r.reason > 0 { items.append(.init("brain", "推理", Fmt.human(r.reason))) }
+                    return items
+                }(), tint: Theme.kilo)
+            } else {
+                emptyHint
+            }
+        }
+    }
+
     @ViewBuilder
     func inactiveToolsLine(hasClaude: Bool, hasCodex: Bool, hasGemini: Bool,
                            hasGrok: Bool, hasQoder: Bool, hasHermes: Bool,
-                           hasClaw: Bool, hasOCode: Bool) -> some View {
+                           hasClaw: Bool, hasOCode: Bool, hasKilo: Bool) -> some View {
         let names: [(Bool, String)] = [
             (showClaude && !hasClaude, "Claude"), (showCodex && !hasCodex, "Codex"),
             (showGemini && !hasGemini, "Gemini"), (showGrok && !hasGrok, "Grok"),
             (showQoder && !hasQoder, "Qoder"), (showHermes && !hasHermes, "Hermes"),
             (showOpenClaw && !hasClaw, "OpenClaw"), (showOpenCode && !hasOCode, "OpenCode"),
+            (showKilo && !hasKilo, "Kilo"),
         ]
         let inactive = names.filter(\.0).map(\.1)
         if !inactive.isEmpty {
@@ -763,6 +793,7 @@ struct PanelView: View {
                 settingsRow("Hermes", tint: Theme.hermes, isOn: $showHermes)
                 settingsRow("OpenClaw", tint: Theme.openclaw, isOn: $showOpenClaw)
                 settingsRow("OpenCode", tint: Theme.opencode, isOn: $showOpenCode)
+                settingsRow("Kilo", tint: Theme.kilo, isOn: $showKilo)
             }
         }
     }

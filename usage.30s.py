@@ -27,6 +27,8 @@ OPENCODE_DIR = os.path.join(HOME, ".local", "share", "opencode", "storage", "mes
 OPENCODE_DB = os.path.join(HOME, ".local", "share", "opencode", "opencode.db")
 OPENCLAW_DB = os.path.join(HOME, ".openclaw", "tasks", "runs.sqlite")
 OPENCLAW_AGENTS = os.path.join(HOME, ".openclaw", "agents")
+KILO_DIR = os.environ.get("KILO_DATA_DIR", os.path.join(HOME, ".local", "share", "kilo"))
+KILO_DB = os.path.join(KILO_DIR, "kilo.db")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _USER_DIR = os.path.join(HOME, ".tokei")
@@ -325,6 +327,12 @@ def _empty_openclaw():
 
 
 def _empty_opencode():
+    ranges = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0,
+                  "cost": 0.0, "sessions": set(), "models": {}} for k in RANGE_KEYS}
+    return {"ranges": ranges}
+
+
+def _empty_kilo():
     ranges = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0,
                   "cost": 0.0, "sessions": set(), "models": {}} for k in RANGE_KEYS}
     return {"ranges": ranges}
@@ -1417,6 +1425,115 @@ def scan_opencode(bounds, cache):
     return {"ranges": B}
 
 
+# ---------- Kilo ----------
+# SQLite: ~/.local/share/kilo/kilo.db (session 表: model, tokens_input/output/reasoning/cache_read/write, cost)
+def _kilo_model_id(raw):
+    """Kilo 的 model 字段是 JSON,提取模型 id。"""
+    if isinstance(raw, dict):
+        return raw.get("id") or raw.get("modelID") or raw.get("name") or ""
+    if isinstance(raw, str):
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                return obj.get("id") or obj.get("modelID") or obj.get("name") or raw
+        except Exception:
+            pass
+        return raw
+    return ""
+
+
+def scan_kilo(bounds, cache):
+    import sqlite3 as _sq
+    fc = cache.setdefault("kilo", {})
+    B = {k: {"in": 0, "out": 0, "cr": 0, "cw": 0, "reason": 0,
+             "cost": 0.0, "sessions": set(), "models": {}} for k in RANGE_KEYS}
+    if not os.path.isfile(KILO_DB):
+        return {"ranges": B}
+
+    today_d = bounds["today"].date()
+    yest_d = bounds["yesterday"].date()
+    week_d = bounds["week"].date()
+    lw_start_d = bounds["last_week"].date()
+    lw_end_d = bounds["last_week_end"].date()
+    month_d = bounds["month"].date()
+    year_d = bounds["year"].date()
+
+    sig = _sqlite_sig(KILO_DB)
+    entry = fc.get("_db")
+    if sig and (not entry or entry.get("sig") != sig):
+        days = {}
+        try:
+            conn = _sq.connect(f"file:{KILO_DB}?mode=ro", uri=True)
+            rows = conn.execute("""
+                SELECT id, model, cost, tokens_input, tokens_output,
+                       tokens_reasoning, tokens_cache_read, tokens_cache_write,
+                       time_created
+                FROM session
+                WHERE tokens_input > 0 OR tokens_output > 0
+            """)
+            for sid, model_raw, cost, inp, out, reason, cr, cw, ts in rows:
+                if ts is None:
+                    continue
+                inp = int(inp or 0); out = int(out or 0)
+                reason = int(reason or 0); cr = int(cr or 0); cw = int(cw or 0)
+                cost = float(cost or 0)
+                if inp == 0 and out == 0 and reason == 0 and cr == 0 and cw == 0:
+                    continue
+                # Kilo 时间戳是毫秒
+                dk = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+                day = days.setdefault(dk, {"in": 0, "out": 0, "cr": 0, "cw": 0,
+                                           "reason": 0, "cost": 0.0, "sessions": set(), "models": {}})
+                day["in"] += inp; day["out"] += out
+                day["reason"] += reason; day["cr"] += cr; day["cw"] += cw
+                day["cost"] += cost
+                if sid:
+                    day["sessions"].add(sid)
+                model = _kilo_model_id(model_raw)
+                if model:
+                    mm = day["models"].setdefault(model, {"in": 0, "out": 0, "cost": 0.0})
+                    mm["in"] += inp; mm["out"] += out; mm["cost"] += cost
+            conn.close()
+            for day in days.values():
+                day["sessions"] = sorted(day["sessions"])
+            fc["_db"] = {"sig": sig, "days": days}
+        except Exception:
+            if not entry:
+                return {"ranges": B}
+    else:
+        entry = fc.get("_db")
+
+    if not entry:
+        return {"ranges": B}
+
+    for dk, day in entry.get("days", {}).items():
+        try:
+            dd = date.fromisoformat(dk)
+        except ValueError:
+            continue
+        ks = []
+        if dd == today_d: ks.append("today")
+        if dd == yest_d: ks.append("yesterday")
+        if dd >= week_d: ks.append("week")
+        if lw_start_d <= dd < lw_end_d: ks.append("last_week")
+        if dd >= month_d: ks.append("month")
+        if dd >= year_d: ks.append("year")
+        for k in ks:
+            b = B[k]
+            b["in"] += day["in"]; b["out"] += day["out"]
+            b["cr"] += day["cr"]; b["cw"] += day["cw"]
+            b["reason"] += day["reason"]; b["cost"] += day["cost"]
+            for sid in day.get("sessions", []):
+                if sid:
+                    b["sessions"].add(sid)
+            for mn, mv in day.get("models", {}).items():
+                if not mn:
+                    continue
+                mm = b["models"].setdefault(mn, {"in": 0, "out": 0, "cost": 0.0})
+                mm["in"] += mv["in"]; mm["out"] += mv["out"]
+                mm["cost"] += mv["cost"]
+    return {"ranges": B}
+
+
 def fmt_reset(epoch):
     try:
         return datetime.fromtimestamp(int(epoch)).astimezone().strftime("%m-%d %H:%M")
@@ -1521,6 +1638,7 @@ def compute():
     hm = _safe_scan("hermes", lambda: scan_hermes(bounds, cache), _empty_hermes, errors)
     oc = _safe_scan("openclaw", lambda: scan_openclaw(bounds, cache), _empty_openclaw, errors)
     ocode = _safe_scan("opencode", lambda: scan_opencode(bounds, cache), _empty_opencode, errors)
+    kilo = _safe_scan("kilo", lambda: scan_kilo(bounds, cache), _empty_kilo, errors)
     _save_scan_cache(cache)
 
     def claude_range(b):
@@ -1610,6 +1728,16 @@ def compute():
 
     ocranges = {k: opencode_range(ocode["ranges"][k]) for k in RANGE_KEYS}
 
+    def kilo_range(b):
+        denom = b["cr"] + b["cw"] + b["in"]
+        hit = (b["cr"] / denom * 100) if denom else 0.0
+        models = [{"name": nice_model(n), "in": v["in"], "out": v["out"], "cost": v["cost"]}
+                  for n, v in sorted(b["models"].items(), key=lambda kv: -kv[1]["cost"])]
+        return {"hit": hit, "in": b["in"], "out": b["out"], "cr": b["cr"], "cw": b["cw"],
+                "reason": b["reason"], "cost": b["cost"], "sessions": len(b["sessions"]), "models": models}
+
+    kiloranges = {k: kilo_range(kilo["ranges"][k]) for k in RANGE_KEYS}
+
     cur = cc["cur"]
     cur_total = cur["in"] + cur["out"] + cur["cr"] + cur["cw"]
 
@@ -1660,6 +1788,9 @@ def compute():
         },
         "opencode": {
             "ranges": ocranges,
+        },
+        "kilo": {
+            "ranges": kiloranges,
         },
     }
     if errors:
@@ -1986,6 +2117,11 @@ def daily_costs():
             d = days.setdefault(dk, _empty())
             d["tokens"] += day.get("in", 0) + day.get("out", 0)
 
+    for fp, entry in cache.get("kilo", {}).items():
+        for dk, day in entry.get("days", {}).items():
+            d = days.setdefault(dk, _empty())
+            d["tokens"] += day.get("in", 0) + day.get("out", 0) + day.get("cr", 0) + day.get("cw", 0) + day.get("reason", 0)
+
     codex_total = sum(d["codex"] for d in days.values())
     codex_in = sum(d["x_in"] for d in days.values())
     codex_out = sum(d["x_out"] for d in days.values())
@@ -2115,6 +2251,17 @@ def wrapped():
 
     # --- OpenCode (in + out + cr + cw + reason) ---
     for f, entry in cache.get("opencode", {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for dk, day in entry.get("days", {}).items():
+            tok = day.get("in", 0) + day.get("out", 0) + day.get("cr", 0) + day.get("cw", 0) + day.get("reason", 0)
+            day_tokens[dk] = day_tokens.get(dk, 0) + tok
+            total_tokens += tok
+            total_cost += day.get("cost", 0)
+            weekday[date.fromisoformat(dk).weekday()] += tok
+
+    # --- Kilo (in + out + cr + cw + reason) ---
+    for f, entry in cache.get("kilo", {}).items():
         if not isinstance(entry, dict):
             continue
         for dk, day in entry.get("days", {}).items():

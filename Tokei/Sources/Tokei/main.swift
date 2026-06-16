@@ -144,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hermes = u.hermes.ranges.today
             let openclaw = u.openclaw.ranges.today
             let opencode = u.opencode.ranges.today
+            let kilo = u.kilo.ranges.today
             return claude.in + claude.out + claude.cr + claude.cw
                 + codex.in + codex.cached + codex.out
                 + gemini.in + gemini.cached + gemini.out + gemini.thoughts
@@ -151,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 + hermes.in + hermes.out + hermes.cr + hermes.cw + hermes.reason
                 + openclaw.in + openclaw.out + openclaw.cr + openclaw.cw
                 + opencode.in + opencode.out + opencode.cr + opencode.cw + opencode.reason
+                + kilo.in + kilo.out + kilo.cr + kilo.cw + kilo.reason
         }
 
         func appendTodayTokens(_ value: Int) -> Bool {

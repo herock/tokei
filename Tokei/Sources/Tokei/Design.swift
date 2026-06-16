@@ -37,6 +37,7 @@ enum Theme {
     static let hermes = Color(red: 0.40, green: 0.82, blue: 0.60)   // 翠绿
     static let openclaw = Color(red: 0.85, green: 0.45, blue: 0.68) // 玫红
     static let opencode = Color(red: 0.55, green: 0.75, blue: 0.90) // 天蓝灰
+    static let kilo    = Color(red: 0.50, green: 0.60, blue: 0.95) // 蓝紫
 
     static let panelWidth: CGFloat = 322
     static let cardRadius: CGFloat = 16
